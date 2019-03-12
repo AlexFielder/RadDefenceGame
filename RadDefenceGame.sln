@@ -7,19 +7,37 @@ Project("{D954291E-2A0B-460D-934E-DC6B0785DB48}") = "RadDefenceGame.Shared", "Ra
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RadDefenceGame.Windows", "RadDefenceGame.Windows\RadDefenceGame.Windows.csproj", "{4754C266-9F16-4509-B8D4-7D2567172F3A}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RadDefenceGame.Android", "RadDefenceGame.Android\RadDefenceGame.Android.csproj", "{28F58756-5D43-41B3-A3F6-EC78008F78E9}"
+EndProject
 Global
 	GlobalSection(SharedMSBuildProjectFiles) = preSolution
 		RadDefenceGame.Shared\RadDefenceGame.Shared.projitems*{a0cdbd0e-3a41-42b7-9425-a838bc2c7383}*SharedItemsImports = 13
 	EndGlobalSection
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
 		Debug|x86 = Debug|x86
+		Release|Any CPU = Release|Any CPU
 		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{4754C266-9F16-4509-B8D4-7D2567172F3A}.Debug|Any CPU.ActiveCfg = Debug|x86
 		{4754C266-9F16-4509-B8D4-7D2567172F3A}.Debug|x86.ActiveCfg = Debug|x86
 		{4754C266-9F16-4509-B8D4-7D2567172F3A}.Debug|x86.Build.0 = Debug|x86
+		{4754C266-9F16-4509-B8D4-7D2567172F3A}.Release|Any CPU.ActiveCfg = Release|x86
 		{4754C266-9F16-4509-B8D4-7D2567172F3A}.Release|x86.ActiveCfg = Release|x86
 		{4754C266-9F16-4509-B8D4-7D2567172F3A}.Release|x86.Build.0 = Release|x86
+		{28F58756-5D43-41B3-A3F6-EC78008F78E9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{28F58756-5D43-41B3-A3F6-EC78008F78E9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{28F58756-5D43-41B3-A3F6-EC78008F78E9}.Debug|Any CPU.Deploy.0 = Debug|Any CPU
+		{28F58756-5D43-41B3-A3F6-EC78008F78E9}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{28F58756-5D43-41B3-A3F6-EC78008F78E9}.Debug|x86.Build.0 = Debug|Any CPU
+		{28F58756-5D43-41B3-A3F6-EC78008F78E9}.Debug|x86.Deploy.0 = Debug|Any CPU
+		{28F58756-5D43-41B3-A3F6-EC78008F78E9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{28F58756-5D43-41B3-A3F6-EC78008F78E9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{28F58756-5D43-41B3-A3F6-EC78008F78E9}.Release|Any CPU.Deploy.0 = Release|Any CPU
+		{28F58756-5D43-41B3-A3F6-EC78008F78E9}.Release|x86.ActiveCfg = Release|Any CPU
+		{28F58756-5D43-41B3-A3F6-EC78008F78E9}.Release|x86.Build.0 = Release|Any CPU
+		{28F58756-5D43-41B3-A3F6-EC78008F78E9}.Release|x86.Deploy.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
