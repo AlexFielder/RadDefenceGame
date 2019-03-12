@@ -3,7 +3,24 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
 VisualStudioVersion = 15.0.28307.489
 MinimumVisualStudioVersion = 10.0.40219.1
+Project("{D954291E-2A0B-460D-934E-DC6B0785DB48}") = "RadDefenceGame.Shared", "RadDefenceGame.Shared\RadDefenceGame.Shared.shproj", "{A0CDBD0E-3A41-42B7-9425-A838BC2C7383}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RadDefenceGame.Windows", "RadDefenceGame.Windows\RadDefenceGame.Windows.csproj", "{4754C266-9F16-4509-B8D4-7D2567172F3A}"
+EndProject
 Global
+	GlobalSection(SharedMSBuildProjectFiles) = preSolution
+		RadDefenceGame.Shared\RadDefenceGame.Shared.projitems*{a0cdbd0e-3a41-42b7-9425-a838bc2c7383}*SharedItemsImports = 13
+	EndGlobalSection
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x86 = Debug|x86
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{4754C266-9F16-4509-B8D4-7D2567172F3A}.Debug|x86.ActiveCfg = Debug|x86
+		{4754C266-9F16-4509-B8D4-7D2567172F3A}.Debug|x86.Build.0 = Debug|x86
+		{4754C266-9F16-4509-B8D4-7D2567172F3A}.Release|x86.ActiveCfg = Release|x86
+		{4754C266-9F16-4509-B8D4-7D2567172F3A}.Release|x86.Build.0 = Release|x86
+	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
