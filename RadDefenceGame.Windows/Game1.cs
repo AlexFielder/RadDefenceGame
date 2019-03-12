@@ -11,6 +11,21 @@ namespace RadDefenceGame.Windows
     {
         GraphicsDeviceManager graphics;
         SpriteBatch spriteBatch;
+        //texture2D objects
+        private Texture2D background;
+        private Texture2D shuttle;
+        private Texture2D earth;
+
+        private Texture2D arrow;
+        private float angle = 0;
+
+        //spritefonts
+        private SpriteFont font;
+        private int score = 0;
+        //Texture Atlases
+        private AnimatedSprite animatedSprite;
+
+
 
         public Game1()
         {
@@ -39,8 +54,14 @@ namespace RadDefenceGame.Windows
         {
             // Create a new SpriteBatch, which can be used to draw textures.
             spriteBatch = new SpriteBatch(GraphicsDevice);
+            background = Content.Load<Texture2D>("Images\\stars");
+            //shuttle = Content.Load<Texture2D>("Images\\shuttle");
+            //earth = Content.Load<Texture2D>("Images\\earth");
+            //font = Content.Load<SpriteFont>("Score"); // Use the name of your sprite font file here instead of 'Score'.
+            Texture2D texture = Content.Load<Texture2D>("TextureAtlases\\SmileyWalk");
+            animatedSprite = new AnimatedSprite(texture, 4, 4);
 
-            // TODO: use this.Content to load your game content here
+            arrow = Content.Load<Texture2D>("Images\\arrow"); // use the name of your texture here, if you are using your own
         }
 
         /// <summary>
@@ -62,7 +83,9 @@ namespace RadDefenceGame.Windows
             if (GamePad.GetState(PlayerIndex.One).Buttons.Back == ButtonState.Pressed || Keyboard.GetState().IsKeyDown(Keys.Escape))
                 Exit();
 
-            // TODO: Add your update logic here
+            //score++;
+            animatedSprite.Update();
+            angle += 0.01f;
 
             base.Update(gameTime);
         }
@@ -75,7 +98,26 @@ namespace RadDefenceGame.Windows
         {
             GraphicsDevice.Clear(Color.CornflowerBlue);
 
-            // TODO: Add your drawing code here
+            spriteBatch.Begin();
+
+            spriteBatch.Draw(background, new Rectangle(0, 0, 800, 600), Color.White);
+            //spriteBatch.Draw(earth, new Vector2(400, 240), Color.White);
+            //spriteBatch.Draw(shuttle, new Vector2(450, 240), Color.White);
+            //spriteBatch.DrawString(font, "Score: " + score, new Vector2(100, 100), Color.Black);
+            spriteBatch.End();
+
+            animatedSprite.Draw(spriteBatch, new Vector2(400, 200));
+
+            spriteBatch.Begin();
+
+            Vector2 location = new Vector2(400, 240);
+            Rectangle sourceRectangle = new Rectangle(0, 0, arrow.Width, arrow.Height);
+            //Vector2 origin = new Vector2(0, 0);
+            Vector2 origin = new Vector2(arrow.Width / 2, arrow.Height);
+
+            spriteBatch.Draw(arrow, location, sourceRectangle, Color.White, angle, origin, 1.0f, SpriteEffects.None, 1);
+
+            spriteBatch.End();
 
             base.Draw(gameTime);
         }
