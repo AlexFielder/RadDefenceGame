@@ -1,6 +1,7 @@
 ﻿using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
+using System.Collections.Generic;
 
 namespace RadDefenceGame.Windows
 {
@@ -25,7 +26,7 @@ namespace RadDefenceGame.Windows
         //Texture Atlases
         private AnimatedSprite animatedSprite;
 
-
+        ParticleEngine particleEngine;
 
         public Game1()
         {
@@ -58,10 +59,17 @@ namespace RadDefenceGame.Windows
             //shuttle = Content.Load<Texture2D>("Images\\shuttle");
             //earth = Content.Load<Texture2D>("Images\\earth");
             //font = Content.Load<SpriteFont>("Score"); // Use the name of your sprite font file here instead of 'Score'.
-            Texture2D texture = Content.Load<Texture2D>("TextureAtlases\\SmileyWalk");
-            animatedSprite = new AnimatedSprite(texture, 4, 4);
+            //Texture2D texture = Content.Load<Texture2D>("TextureAtlases\\SmileyWalk");
+            //animatedSprite = new AnimatedSprite(texture, 4, 4);
 
-            arrow = Content.Load<Texture2D>("Images\\arrow"); // use the name of your texture here, if you are using your own
+            //arrow = Content.Load<Texture2D>("Images\\arrow"); // use the name of your texture here, if you are using your own
+
+            List<Texture2D> textures = new List<Texture2D>();
+            textures.Add(Content.Load<Texture2D>("Images\\circle"));
+            textures.Add(Content.Load<Texture2D>("Images\\star"));
+            textures.Add(Content.Load<Texture2D>("Images\\diamond"));
+            particleEngine = new ParticleEngine(textures, new Vector2(400, 240));
+
         }
 
         /// <summary>
@@ -84,8 +92,11 @@ namespace RadDefenceGame.Windows
                 Exit();
 
             //score++;
-            animatedSprite.Update();
-            angle += 0.01f;
+            //animatedSprite.Update();
+            //angle += 0.01f;
+
+            particleEngine.EmitterLocation = new Vector2(Mouse.GetState().X, Mouse.GetState().Y);
+            particleEngine.Update();
 
             base.Update(gameTime);
         }
@@ -106,18 +117,20 @@ namespace RadDefenceGame.Windows
             //spriteBatch.DrawString(font, "Score: " + score, new Vector2(100, 100), Color.Black);
             spriteBatch.End();
 
-            animatedSprite.Draw(spriteBatch, new Vector2(400, 200));
+            //animatedSprite.Draw(spriteBatch, new Vector2(400, 200));
 
-            spriteBatch.Begin();
+            //spriteBatch.Begin();
 
-            Vector2 location = new Vector2(400, 240);
-            Rectangle sourceRectangle = new Rectangle(0, 0, arrow.Width, arrow.Height);
-            //Vector2 origin = new Vector2(0, 0);
-            Vector2 origin = new Vector2(arrow.Width / 2, arrow.Height);
+            //Vector2 location = new Vector2(400, 240);
+            //Rectangle sourceRectangle = new Rectangle(0, 0, arrow.Width, arrow.Height);
+            ////Vector2 origin = new Vector2(0, 0);
+            //Vector2 origin = new Vector2(arrow.Width / 2, arrow.Height);
 
-            spriteBatch.Draw(arrow, location, sourceRectangle, Color.White, angle, origin, 1.0f, SpriteEffects.None, 1);
+            //spriteBatch.Draw(arrow, location, sourceRectangle, Color.White, angle, origin, 1.0f, SpriteEffects.None, 1);
 
-            spriteBatch.End();
+            //spriteBatch.End();
+
+
 
             base.Draw(gameTime);
         }
