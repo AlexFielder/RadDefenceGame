@@ -31,6 +31,11 @@ namespace RadDefenceGame.Windows
         public Game1()
         {
             graphics = new GraphicsDeviceManager(this);
+
+            this.Window.AllowUserResizing = true;
+            this.Window.IsBorderless = false;
+            this.Window.Title = "Rad Defence 0.0.1";
+
             Content.RootDirectory = "Content";
         }
 
@@ -55,6 +60,11 @@ namespace RadDefenceGame.Windows
         {
             // Create a new SpriteBatch, which can be used to draw textures.
             spriteBatch = new SpriteBatch(GraphicsDevice);
+            graphics.PreferredBackBufferWidth = GraphicsDevice.DisplayMode.Width;
+            graphics.PreferredBackBufferHeight = GraphicsDevice.DisplayMode.Height;
+            graphics.IsFullScreen = false; // true;
+            //graphics.ToggleFullScreen();
+            graphics.ApplyChanges();
             background = Content.Load<Texture2D>("Images\\stars");
             //shuttle = Content.Load<Texture2D>("Images\\shuttle");
             //earth = Content.Load<Texture2D>("Images\\earth");
