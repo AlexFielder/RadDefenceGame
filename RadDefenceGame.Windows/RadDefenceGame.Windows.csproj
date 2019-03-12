@@ -43,6 +43,8 @@
   <ItemGroup>
     <Compile Include="AnimatedSprite.cs" />
     <Compile Include="Game1.cs" />
+    <Compile Include="Particle.cs" />
+    <Compile Include="ParticleEngine.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

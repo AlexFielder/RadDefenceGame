@@ -61,5 +61,15 @@ namespace RadDefenceGame.Windows
                 }
             }
         }
+
+        public void Draw(SpriteBatch spriteBatch)
+        {
+            spriteBatch.Begin();
+            for (int index = 0; index < particles.Count; index++)
+            {
+                particles[index].Draw(spriteBatch);
+            }
+            spriteBatch.End();
+        }
     }
 }
