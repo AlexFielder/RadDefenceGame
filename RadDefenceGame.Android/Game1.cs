@@ -20,7 +20,6 @@ public class Game1 : Game
         _graphics.IsFullScreen = true;
         _graphics.PreferredBackBufferWidth = 800;
         _graphics.PreferredBackBufferHeight = 480;
-        _graphics.SupportedOrientations = DisplayOrientation.LandscapeLeft | DisplayOrientation.LandscapeRight;
     }
 
     /// <summary>
