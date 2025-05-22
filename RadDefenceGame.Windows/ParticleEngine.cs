@@ -6,70 +6,69 @@ using System.Threading.Tasks;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework;
 
-namespace RadDefenceGame.Windows
+namespace RadDefenceGame.Windows;
+
+public class ParticleEngine
 {
-    public class ParticleEngine
+    private readonly Random _random;
+    public Vector2 EmitterLocation { get; set; }
+    private readonly List<Particle> _particles;
+    private readonly List<Texture2D> _textures;
+
+    public ParticleEngine(List<Texture2D> textures, Vector2 location)
     {
-        private Random random;
-        public Vector2 EmitterLocation { get; set; }
-        private List<Particle> particles;
-        private List<Texture2D> textures;
+        EmitterLocation = location;
+        _textures = textures;
+        _particles = new List<Particle>();
+        _random = new Random();
+    }
 
-        public ParticleEngine(List<Texture2D> textures, Vector2 location)
+    private Particle GenerateNewParticle()
+    {
+        Texture2D texture = _textures[_random.Next(_textures.Count)];
+        Vector2 position = EmitterLocation;
+        Vector2 velocity = new(
+                1f * (float)(_random.NextDouble() * 2 - 1),
+                1f * (float)(_random.NextDouble() * 2 - 1));
+        float angle = 0;
+        float angularVelocity = 0.1f * (float)(_random.NextDouble() * 2 - 1);
+        Color color = new(
+                (float)_random.NextDouble(),
+                (float)_random.NextDouble(),
+                (float)_random.NextDouble());
+        float size = (float)_random.NextDouble();
+        int ttl = 20 + _random.Next(40);
+
+        return new Particle(texture, position, velocity, angle, angularVelocity, color, size, ttl);
+    }
+
+    public void Update()
+    {
+        int total = 10;
+
+        for (int i = 0; i < total; i++)
         {
-            EmitterLocation = location;
-            this.textures = textures;
-            this.particles = new List<Particle>();
-            random = new Random();
+            _particles.Add(GenerateNewParticle());
         }
 
-        private Particle GenerateNewParticle()
+        for (int particle = 0; particle < _particles.Count; particle++)
         {
-            Texture2D texture = textures[random.Next(textures.Count)];
-            Vector2 position = EmitterLocation;
-            Vector2 velocity = new Vector2(
-                    1f * (float)(random.NextDouble() * 2 - 1),
-                    1f * (float)(random.NextDouble() * 2 - 1));
-            float angle = 0;
-            float angularVelocity = 0.1f * (float)(random.NextDouble() * 2 - 1);
-            Color color = new Color(
-                    (float)random.NextDouble(),
-                    (float)random.NextDouble(),
-                    (float)random.NextDouble());
-            float size = (float)random.NextDouble();
-            int ttl = 20 + random.Next(40);
-
-            return new Particle(texture, position, velocity, angle, angularVelocity, color, size, ttl);
-        }
-
-        public void Update()
-        {
-            int total = 10;
-
-            for (int i = 0; i < total; i++)
+            _particles[particle].Update();
+            if (_particles[particle].TTL <= 0)
             {
-                particles.Add(GenerateNewParticle());
-            }
-
-            for (int particle = 0; particle < particles.Count; particle++)
-            {
-                particles[particle].Update();
-                if (particles[particle].TTL <= 0)
-                {
-                    particles.RemoveAt(particle);
-                    particle--;
-                }
+                _particles.RemoveAt(particle);
+                particle--;
             }
         }
+    }
 
-        public void Draw(SpriteBatch spriteBatch)
+    public void Draw(SpriteBatch spriteBatch)
+    {
+        spriteBatch.Begin();
+        for (int index = 0; index < _particles.Count; index++)
         {
-            spriteBatch.Begin();
-            for (int index = 0; index < particles.Count; index++)
-            {
-                particles[index].Draw(spriteBatch);
-            }
-            spriteBatch.End();
+            _particles[index].Draw(spriteBatch);
         }
+        spriteBatch.End();
     }
 }
