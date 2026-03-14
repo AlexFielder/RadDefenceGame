@@ -1,0 +1,10 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="RadDefenceGame.Android/RadDefenceGame.Android.csproj">
+    <Deploy />
+  </Project>
+  <Project Path="RadDefenceGame.Windows/RadDefenceGame.Windows.csproj" />
+</Solution>
