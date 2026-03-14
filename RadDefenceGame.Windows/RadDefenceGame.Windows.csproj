@@ -25,12 +25,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="Content\**\*.*">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
-
-  <ItemGroup>
     <Content Include="Icon.ico" />
   </ItemGroup>
 
@@ -40,5 +34,20 @@
     <Copyright>Copyright © 2019-2023</Copyright>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <FileVersion>1.0.0.0</FileVersion>
+    <ContentDir>$([System.IO.Path]::GetFullPath('$(ProjectDir)Content'))</ContentDir>
   </PropertyGroup>
+
+  <!-- Build content manually using mgcb and copy to output -->
+  <Target Name="BuildContent" BeforeTargets="BeforeBuild">
+    <Exec 
+      Command="mgcb /@:Content.mgcb /platform:DesktopGL /outputDir:bin/DesktopGL/Content /intermediateDir:obj/DesktopGL/Content" 
+      WorkingDirectory="$(ProjectDir)Content" />
+  </Target>
+
+  <ItemGroup>
+    <None Include="Content\bin\DesktopGL\Content\**\*.*">
+      <Link>Content\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 </Project>
