@@ -17,11 +17,21 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="AnimatedSprite.cs" />
-    <Compile Include="Game1.cs" />
-    <Compile Include="Particle.cs" />
-    <Compile Include="ParticleEngine.cs" />
     <Compile Include="Program.cs" />
+    <Compile Include="Game1.cs" />
+    <Compile Include="GameSettings.cs" />
+    <Compile Include="GameState.cs" />
+    <Compile Include="CellType.cs" />
+    <Compile Include="Map.cs" />
+    <Compile Include="Enemy.cs" />
+    <Compile Include="Tower.cs" />
+    <Compile Include="TowerType.cs" />
+    <Compile Include="Projectile.cs" />
+    <Compile Include="WaveManager.cs" />
+    <Compile Include="PlacementMode.cs" />
+    <Compile Include="ToolbarButton.cs" />
+    <Compile Include="ContextMenu.cs" />
+    <Compile Include="SeedManager.cs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -31,23 +41,21 @@
   <PropertyGroup>
     <AssemblyTitle>RadDefenceGame.Windows</AssemblyTitle>
     <Product>RadDefenceGame.Windows</Product>
-    <Copyright>Copyright © 2019-2023</Copyright>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>1.0.0.0</FileVersion>
-    <ContentDir>$([System.IO.Path]::GetFullPath('$(ProjectDir)Content'))</ContentDir>
+    <Copyright>Copyright © 2019-2025</Copyright>
+    <AssemblyVersion>0.4.0.0</AssemblyVersion>
+    <FileVersion>0.4.0.0</FileVersion>
   </PropertyGroup>
 
-  <!-- Build content manually using mgcb and copy to output -->
   <Target Name="BuildContent" BeforeTargets="BeforeBuild">
-    <Exec 
-      Command="mgcb /@:Content.mgcb /platform:DesktopGL /outputDir:bin/DesktopGL/Content /intermediateDir:obj/DesktopGL/Content" 
-      WorkingDirectory="$(ProjectDir)Content" />
+    <Exec Command="mgcb /@:Content.mgcb" WorkingDirectory="$(ProjectDir)Content" />
   </Target>
 
-  <ItemGroup>
-    <None Include="Content\bin\DesktopGL\Content\**\*.*">
-      <Link>Content\%(RecursiveDir)%(Filename)%(Extension)</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
+  <Target Name="CopyContent" AfterTargets="Build">
+    <ItemGroup>
+      <ContentFiles Include="$(ProjectDir)Content\bin\DesktopGL\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ContentFiles)"
+          DestinationFiles="@(ContentFiles->'$(OutputPath)Content\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
 </Project>

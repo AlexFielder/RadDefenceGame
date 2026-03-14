@@ -1,9 +1,9 @@
 
 #----------------------------- Global Properties ----------------------------#
 
-/outputDir:bin/$(Platform)
-/intermediateDir:obj/$(Platform)
-/platform:Windows
+/outputDir:bin/DesktopGL
+/intermediateDir:obj/DesktopGL
+/platform:DesktopGL
 /config:
 /profile:Reach
 /compress:False
@@ -115,4 +115,3 @@
 /processorParam:MakeSquare=False
 /processorParam:TextureFormat=Color
 /build:TextureAtlases/SmileyWalk.png
-
