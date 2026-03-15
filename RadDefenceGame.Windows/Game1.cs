@@ -25,7 +25,6 @@ public class Game1 : Game
     private readonly List<Projectile> _projectiles = new();
     private readonly List<FlameParticle> _flames = new();
 
-    // -- stats + leaderboard --
     private GameStats _runStats = null!;
     private Leaderboard _leaderboard = null!;
     private int _lastRank;
@@ -46,6 +45,7 @@ public class Game1 : Game
     private string _seedInput = "";
     private bool _seedInputActive;
     private bool _gameOverSoundPlayed;
+    private bool _paused;
 
     public Game1()
     {
@@ -95,10 +95,9 @@ public class Game1 : Game
         _screen = GameScreen.Playing;
         _seedInput = ""; _seedInputActive = false;
         _gameOverSoundPlayed = false;
+        _paused = false;
         _lastRank = 0;
-
         _runStats = new GameStats { Seed = seed };
-
         BuildToolbar();
     }
 
@@ -175,8 +174,24 @@ public class Game1 : Game
         var kb = Keyboard.GetState(); var mouse = Mouse.GetState();
         AudioManager.Instance.Update((float)gameTime.ElapsedGameTime.TotalSeconds);
 
-        if (kb.IsKeyDown(Keys.Escape) && _screen == GameScreen.Playing)
-        { _contextMenu.Close(); _screen = GameScreen.Title; _seeds.NewRandomSeed(); }
+        // ESC handling for playing state: pause/unpause/quit
+        if (_screen == GameScreen.Playing && JustPressed(kb, Keys.Escape))
+        {
+            if (_paused)
+            {
+                // ESC while paused = quit to title
+                _paused = false;
+                _contextMenu.Close();
+                _screen = GameScreen.Title;
+                _seeds.NewRandomSeed();
+            }
+            else
+            {
+                // ESC while playing = pause
+                _paused = true;
+                _contextMenu.Close();
+            }
+        }
 
         switch (_screen)
         {
@@ -209,10 +224,17 @@ public class Game1 : Game
 
     private void UpdatePlaying(GameTime gameTime, KeyboardState kb, MouseState mouse)
     {
+        // while paused, only allow resume (SPACE) - ESC handled in main Update
+        if (_paused)
+        {
+            if (JustPressed(kb, Keys.Space))
+                _paused = false;
+            return;
+        }
+
         if (!_state.IsGameOver)
         {
             _runStats.PlayTimeSeconds += (float)gameTime.ElapsedGameTime.TotalSeconds;
-
             HandleInput(kb, mouse);
             var st = ScaleGameTime(gameTime);
             _waves.Update(st, _enemies, _state);
@@ -223,13 +245,10 @@ public class Game1 : Game
         {
             _contextMenu.Close();
             _seeds.UpdateBest(_seeds.CurrentSeed, _state.Score, _waves.CurrentWave);
-
             if (!_gameOverSoundPlayed)
             {
                 AudioManager.Instance.Play("game_over", 0.8f);
                 _gameOverSoundPlayed = true;
-
-                // submit stats to leaderboard
                 _runStats.FinalScore = _state.Score;
                 _runStats.WavesCompleted = _waves.CurrentWave;
                 _lastRank = _leaderboard.Submit(_runStats);
@@ -340,20 +359,13 @@ public class Game1 : Game
 
     private void NotifyEnemiesPathChanged() { foreach (var e in _enemies) if (e.IsAlive) e.UpdatePath(_map.CurrentPath); }
 
-    // --- SIMULATION ---
-
     private void UpdateEnemies(GameTime gt)
     {
         foreach (var e in _enemies)
         {
             e.Update(gt);
             if (e.ReachedEnd && !e.IsAlive)
-            {
-                _state.LoseLife();
-                _runStats.RecordLifeLost();
-                AudioManager.Instance.Play("life_lost", 0.7f, 0.1f);
-                e.ReachedEnd = false;
-            }
+            { _state.LoseLife(); _runStats.RecordLifeLost(); AudioManager.Instance.Play("life_lost", 0.7f, 0.1f); e.ReachedEnd = false; }
         }
     }
 
@@ -380,12 +392,8 @@ public class Game1 : Game
                     }
                     int totalReward = reward + (int)(reward * grindBonus);
                     _state.EarnReward(totalReward);
-
-                    // track stats
-                    _runStats.RecordKill(e.Type);
-                    _runStats.RecordMoney(totalReward);
-                    if (e.LastDamageSource.HasValue)
-                        _runStats.RecordTowerKill(e.LastDamageSource.Value);
+                    _runStats.RecordKill(e.Type); _runStats.RecordMoney(totalReward);
+                    if (e.LastDamageSource.HasValue) _runStats.RecordTowerKill(e.LastDamageSource.Value);
 
                     if (grindBonus > 0) AudioManager.Instance.PlayVaried("tower_grinder", 0.3f, 0.15f, 0.1f);
                     if (e.Reward > 25) AudioManager.Instance.PlayVaried("death_boss", 0.5f, 0.1f, 0.08f);
@@ -408,7 +416,10 @@ public class Game1 : Game
         switch (_screen)
         {
             case GameScreen.Title: DrawTitle(); break;
-            case GameScreen.Playing: DrawGame(); break;
+            case GameScreen.Playing:
+                DrawGame();
+                if (_paused) DrawPauseOverlay();
+                break;
             case GameScreen.GameOver: DrawGame(); DrawGameOverOverlay(); break;
         }
         _spriteBatch.End();
@@ -426,7 +437,6 @@ public class Game1 : Game
         if (_seedInputActive)
             DrawCentred($"Enter seed: {(_seedInput.Length > 0 ? _seedInput : "_")}", cx, 235, Color.White);
 
-        // leaderboard on title screen
         if (_leaderboard.TopRuns.Count > 0)
         {
             DrawCentred("--- High Scores ---", cx, 280, Color.Gold);
@@ -434,8 +444,8 @@ public class Game1 : Game
             for (int i = 0; i < Math.Min(8, _leaderboard.TopRuns.Count); i++)
             {
                 var run = _leaderboard.TopRuns[i];
-                string line = $"#{i+1}  {run.Score} pts  Wave {run.Wave}  Kills {run.Kills}  Seed {run.Seed}";
-                DrawCentred(line, cx, y, i == 0 ? Color.Gold : Color.LightGray);
+                DrawCentred($"#{i+1}  {run.Score} pts  Wave {run.Wave}  Kills {run.Kills}  Seed {run.Seed}",
+                    cx, y, i == 0 ? Color.Gold : Color.LightGray);
                 y += 22;
             }
         }
@@ -452,7 +462,6 @@ public class Game1 : Game
             }
         }
 
-        // career stats at bottom
         if (_leaderboard.Career.TotalGamesPlayed > 0)
         {
             var c = _leaderboard.Career;
@@ -470,6 +479,19 @@ public class Game1 : Game
         DrawPlacementGhost(); DrawTowers(); DrawFlames(); DrawEnemies(); DrawProjectiles();
         DrawHUD(); DrawToolbar();
         _contextMenu.Draw(_spriteBatch, _sprites.Pixel, _font);
+    }
+
+    private void DrawPauseOverlay()
+    {
+        _spriteBatch.Draw(_sprites.Pixel,
+            new Rectangle(0, 0, GameSettings.ScreenWidth, GameSettings.ScreenHeight),
+            Color.Black * 0.6f);
+
+        float cx = GameSettings.ScreenWidth / 2f;
+        float cy = GameSettings.ScreenHeight / 2f;
+
+        DrawCentred("PAUSED", cx, cy - 40, Color.White);
+        DrawCentred("[SPACE] Resume    [ESC] Quit to Menu    [R] Restart", cx, cy + 10, Color.LightGray);
     }
 
     private void DrawPlacementGhost()
@@ -532,37 +554,24 @@ public class Game1 : Game
     private void DrawGameOverOverlay()
     {
         _spriteBatch.Draw(_sprites.Pixel, new Rectangle(0, 0, GameSettings.ScreenWidth, GameSettings.ScreenHeight), Color.Black * 0.8f);
-        float cx = GameSettings.ScreenWidth / 2f;
-        float y = 160;
+        float cx = GameSettings.ScreenWidth / 2f; float y = 160;
 
         DrawCentred("GAME OVER", cx, y, Color.Red); y += 40;
-
         if (_lastRank > 0)
-        {
-            string rankText = _lastRank == 1 ? "NEW HIGH SCORE!" : $"Rank #{_lastRank} on leaderboard!";
-            DrawCentred(rankText, cx, y, _lastRank <= 3 ? Color.Gold : Color.CornflowerBlue);
-            y += 30;
-        }
+        { DrawCentred(_lastRank == 1 ? "NEW HIGH SCORE!" : $"Rank #{_lastRank} on leaderboard!", cx, y, _lastRank <= 3 ? Color.Gold : Color.CornflowerBlue); y += 30; }
 
         DrawCentred($"Score: {_state.Score}  |  Wave: {_waves.CurrentWave}  |  Seed: {_seeds.CurrentSeed}", cx, y, Color.White); y += 35;
         DrawCentred($"Kills: {_runStats.TotalKills}  |  Towers Built: {_runStats.TowersBuilt}  |  Time: {_runStats.PlayTimeSeconds:0}s", cx, y, Color.LightGray); y += 30;
 
-        // kill breakdown
         if (_runStats.KillsByEnemyType.Count > 0)
         {
-            string killBreak = "";
-            foreach (var (et, count) in _runStats.KillsByEnemyType)
-                killBreak += $"{et}: {count}  ";
-            DrawCentred(killBreak.TrimEnd(), cx, y, new Color(150, 150, 180)); y += 25;
+            string kb = ""; foreach (var (et, c) in _runStats.KillsByEnemyType) kb += $"{et}: {c}  ";
+            DrawCentred(kb.TrimEnd(), cx, y, new Color(150, 150, 180)); y += 25;
         }
-
-        // tower kill attribution
         if (_runStats.KillsByTowerType.Count > 0)
         {
-            string towerBreak = "Kills by tower: ";
-            foreach (var (tt, count) in _runStats.KillsByTowerType)
-                towerBreak += $"{Tower.GetName(tt)}: {count}  ";
-            DrawCentred(towerBreak.TrimEnd(), cx, y, new Color(150, 150, 180)); y += 35;
+            string tb = "Kills by tower: "; foreach (var (tt, c) in _runStats.KillsByTowerType) tb += $"{Tower.GetName(tt)}: {c}  ";
+            DrawCentred(tb.TrimEnd(), cx, y, new Color(150, 150, 180)); y += 35;
         }
 
         bool isFav = _seeds.IsFavourite(_seeds.CurrentSeed);
