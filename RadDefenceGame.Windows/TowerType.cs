@@ -9,5 +9,6 @@ public enum TowerType
     Flame,
     Tesla,
     Tachyon,
-    Grinder
+    Grinder,
+    Repair
 }

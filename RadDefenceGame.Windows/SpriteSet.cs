@@ -8,13 +8,12 @@ using System.Collections.Generic;
 public class SpriteSet
 {
     public Dictionary<EnemyType, Texture2D> Enemies { get; } = new();
-
-    // keep legacy accessors for any code still referencing them
     public Texture2D EnemyScout => Enemies[EnemyType.Scout];
 
     public Dictionary<TowerType, Texture2D> Towers { get; } = new();
     public Dictionary<TowerType, Texture2D> Projectiles { get; } = new();
 
+    public Texture2D DroneRepair { get; }
     public Texture2D TileWall { get; }
     public Texture2D TilePath { get; }
     public Texture2D Pixel { get; }
@@ -25,7 +24,6 @@ public class SpriteSet
         Pixel = pixel;
         Ring = ring;
 
-        // enemies (14 types)
         Enemies[EnemyType.Scout]      = content.Load<Texture2D>("Images/enemy_scout");
         Enemies[EnemyType.Grunt]      = content.Load<Texture2D>("Images/enemy_grunt");
         Enemies[EnemyType.Tank]       = content.Load<Texture2D>("Images/enemy_tank");
@@ -41,7 +39,6 @@ public class SpriteSet
         Enemies[EnemyType.Spreader]   = content.Load<Texture2D>("Images/enemy_spreader");
         Enemies[EnemyType.Hacker]     = content.Load<Texture2D>("Images/enemy_hacker");
 
-        // towers
         Towers[TowerType.Basic]   = content.Load<Texture2D>("Images/tower_gun");
         Towers[TowerType.Sniper]  = content.Load<Texture2D>("Images/tower_sniper");
         Towers[TowerType.Rapid]   = content.Load<Texture2D>("Images/tower_rapid");
@@ -50,31 +47,26 @@ public class SpriteSet
         Towers[TowerType.Tesla]   = content.Load<Texture2D>("Images/tower_tesla_array");
         Towers[TowerType.Tachyon] = content.Load<Texture2D>("Images/tower_tachyon_warp");
         Towers[TowerType.Grinder] = content.Load<Texture2D>("Images/tower_parts_grinder");
+        Towers[TowerType.Repair]  = content.Load<Texture2D>("Images/tower_repair");
 
-        // projectiles
+        DroneRepair = content.Load<Texture2D>("Images/drone_repair");
+
         Projectiles[TowerType.Basic]  = content.Load<Texture2D>("Images/proj_bullet");
         Projectiles[TowerType.Sniper] = content.Load<Texture2D>("Images/proj_sniper");
         Projectiles[TowerType.Rapid]  = content.Load<Texture2D>("Images/proj_rapid");
         Projectiles[TowerType.Rocket] = content.Load<Texture2D>("Images/proj_rocket");
         Projectiles[TowerType.Flame]  = content.Load<Texture2D>("Images/proj_flame");
 
-        // tiles
         TileWall = content.Load<Texture2D>("Images/tile_wall");
         TilePath = content.Load<Texture2D>("Images/tile_path");
     }
 
-    /// <summary>Returns the primary enemy type and sprite for a given wave number.
-    /// Special types are mixed in by WaveManager separately.</summary>
     public (Texture2D sprite, EnemyType type) GetEnemyInfo(int waveNumber)
     {
         var type = waveNumber switch
         {
-            <= 2  => EnemyType.Scout,
-            <= 5  => EnemyType.Grunt,
-            <= 8  => EnemyType.Speeder,
-            <= 12 => EnemyType.Tank,
-            <= 16 => EnemyType.Shielded,
-            _     => EnemyType.Boss
+            <= 2  => EnemyType.Scout, <= 5 => EnemyType.Grunt, <= 8 => EnemyType.Speeder,
+            <= 12 => EnemyType.Tank, <= 16 => EnemyType.Shielded, _ => EnemyType.Boss
         };
         return (Enemies[type], type);
     }

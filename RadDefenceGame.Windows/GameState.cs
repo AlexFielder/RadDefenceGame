@@ -1,12 +1,5 @@
 namespace RadDefenceGame.Windows;
 
-public enum GameSpeed
-{
-    Normal = 1,
-    Fast = 2,
-    Fastest = 3
-}
-
 public class GameState
 {
     public int Lives { get; set; } = GameSettings.StartingLives;
@@ -16,12 +9,35 @@ public class GameState
 
     public PlacementMode Mode { get; set; } = PlacementMode.Tower;
     public TowerType SelectedTower { get; set; } = TowerType.Basic;
-    public GameSpeed Speed { get; set; } = GameSpeed.Normal;
 
     /// <summary>When false, waves only start on SPACE. When true, auto-starts after countdown.</summary>
     public bool AutoStartWaves { get; set; } = false;
 
-    public float SpeedMultiplier => (int)Speed;
+    // -- speed system --
+    private int _speedIndex = GameSettings.DefaultSpeedIndex;
+
+    public float SpeedMultiplier => GameSettings.SpeedSteps[_speedIndex];
+    public string SpeedLabel => $"{SpeedMultiplier}x";
+    public bool IsNormalSpeed => _speedIndex == GameSettings.DefaultSpeedIndex;
+
+    public void SpeedUp()
+    {
+        if (_speedIndex < GameSettings.SpeedSteps.Length - 1) _speedIndex++;
+    }
+
+    public void SlowDown()
+    {
+        if (_speedIndex > 0) _speedIndex--;
+    }
+
+    public void CycleSpeed()
+    {
+        _speedIndex = (_speedIndex + 1) % GameSettings.SpeedSteps.Length;
+    }
+
+    public void ResetSpeed() => _speedIndex = GameSettings.DefaultSpeedIndex;
+
+    // -- game state --
 
     public bool IsGameOver => Lives <= 0;
 
@@ -32,29 +48,7 @@ public class GameState
     public void SpendWall() => Walls--;
     public void GrantWalls(int count) => Walls += count;
 
-    public void CycleSpeed()
-    {
-        Speed = Speed switch
-        {
-            GameSpeed.Normal => GameSpeed.Fast,
-            GameSpeed.Fast => GameSpeed.Fastest,
-            _ => GameSpeed.Normal
-        };
-    }
-
-    public string SpeedLabel => Speed switch
-    {
-        GameSpeed.Fast => "2x",
-        GameSpeed.Fastest => "3x",
-        _ => "1x"
-    };
-
-    public void EarnReward(int reward)
-    {
-        Money += reward;
-        Score += reward;
-    }
-
+    public void EarnReward(int reward) { Money += reward; Score += reward; }
     public void LoseLife() => Lives = System.Math.Max(0, Lives - 1);
 
     public void Reset()
@@ -65,7 +59,6 @@ public class GameState
         Score = 0;
         Mode = PlacementMode.Tower;
         SelectedTower = TowerType.Basic;
-        Speed = GameSpeed.Normal;
-        // note: AutoStartWaves is intentionally NOT reset — it's a player preference
+        _speedIndex = GameSettings.DefaultSpeedIndex;
     }
 }
