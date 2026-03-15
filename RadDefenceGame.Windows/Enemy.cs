@@ -14,6 +14,7 @@ public class Enemy
     public bool IsAlive { get; set; } = true;
     public bool ReachedEnd { get; set; }
     public int Reward { get; }
+    public Texture2D Sprite { get; }
 
     // -- burn DOT --
     public bool IsBurning => _burnTimer > 0f;
@@ -23,7 +24,7 @@ public class Enemy
     private int _currentWaypoint = 1;
     private List<Vector2> _path;
 
-    public Enemy(List<Vector2> path, float health, float speed, int reward)
+    public Enemy(List<Vector2> path, float health, float speed, int reward, Texture2D sprite)
     {
         _path = new List<Vector2>(path);
         Position = _path.Count > 0 ? _path[0] : Vector2.Zero;
@@ -31,6 +32,7 @@ public class Enemy
         MaxHealth = health;
         Speed = speed;
         Reward = reward;
+        Sprite = sprite;
     }
 
     public void UpdatePath(List<Vector2> newPath)
@@ -65,7 +67,6 @@ public class Enemy
 
     public void ApplyBurn(float dps, float duration)
     {
-        // refresh/stack: take the higher DPS, reset duration
         _burnDps = MathF.Max(_burnDps, dps);
         _burnTimer = MathF.Max(_burnTimer, duration);
     }
@@ -76,7 +77,6 @@ public class Enemy
 
         float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
 
-        // burn tick
         if (_burnTimer > 0f)
         {
             _burnTimer -= dt;
@@ -112,30 +112,29 @@ public class Enemy
         Position += diff * MathF.Min(step, dist);
     }
 
-    public void Draw(SpriteBatch sb, Texture2D circle, Texture2D pixel)
+    public void Draw(SpriteBatch sb, Texture2D pixel)
     {
         if (!IsAlive) return;
 
         const int size = 24;
-        float hp = Health / MaxHealth;
 
-        // burning enemies glow orange
-        Color body = IsBurning
+        // tint: burning enemies glow orange, otherwise white (show sprite's original colours)
+        Color tint = IsBurning
             ? Color.Lerp(Color.OrangeRed, Color.Yellow, (_burnTimer * 3f) % 1f)
-            : Color.Lerp(Color.Red, Color.Lime, hp);
+            : Color.White;
 
-        sb.Draw(circle,
+        sb.Draw(Sprite,
             new Rectangle((int)(Position.X - size / 2f), (int)(Position.Y - size / 2f), size, size),
-            body);
+            tint);
 
         // health bar
+        float hp = Health / MaxHealth;
         const int barW = 28, barH = 4;
         int bx = (int)(Position.X - barW / 2f);
         int by = (int)(Position.Y - size / 2f - 8);
         sb.Draw(pixel, new Rectangle(bx, by, barW, barH), new Color(60, 0, 0));
         sb.Draw(pixel, new Rectangle(bx, by, (int)(barW * hp), barH), Color.Lime);
 
-        // burn indicator (small orange bar under health)
         if (IsBurning)
         {
             float burnPct = _burnTimer / GameSettings.BurnDuration;

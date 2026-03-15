@@ -11,17 +11,12 @@ public class Projectile
     public float Damage { get; }
     public float Speed { get; }
     public bool IsActive { get; set; } = true;
-    public Color Color { get; }
     public TowerType Source { get; }
 
-    // burn stats (only for Flame projectiles)
     public float BurnDps { get; }
     public float BurnDuration { get; }
-
-    // splash radius (only for Rocket projectiles)
     public float SplashRadius { get; }
 
-    // reference to all enemies for splash damage
     private List<Enemy>? _allEnemies;
 
     public Projectile(Vector2 start, Enemy target, float damage, TowerType source,
@@ -35,14 +30,14 @@ public class Projectile
         BurnDuration = burnDuration;
         SplashRadius = splashRadius;
 
-        (Speed, Color) = source switch
+        Speed = source switch
         {
-            TowerType.Basic  => (400f, new Color(100, 200, 255)),
-            TowerType.Sniper => (600f, new Color(255, 200, 50)),
-            TowerType.Rapid  => (500f, new Color(100, 255, 150)),
-            TowerType.Rocket => (250f, new Color(255, 80, 30)),
-            TowerType.Flame  => (350f, new Color(255, 150, 0)),
-            _ => (400f, Color.White)
+            TowerType.Basic  => 400f,
+            TowerType.Sniper => 600f,
+            TowerType.Rapid  => 500f,
+            TowerType.Rocket => 250f,
+            TowerType.Flame  => 350f,
+            _ => 400f
         };
     }
 
@@ -76,18 +71,17 @@ public class Projectile
     {
         if (Source == TowerType.Rocket && _allEnemies != null)
         {
-            // splash damage to all enemies in radius
             foreach (var e in _allEnemies)
             {
                 if (!e.IsAlive) continue;
                 float d = Vector2.Distance(Target.Position, e.Position);
                 if (d <= SplashRadius)
                 {
-                    // full damage at centre, half at edge
                     float falloff = 1f - (d / SplashRadius) * 0.5f;
                     e.TakeDamage(Damage * falloff);
                 }
             }
+            AudioManager.Instance.PlayVaried("rocket_explode", 0.6f, 0.15f, 0.05f);
         }
         else if (Source == TowerType.Flame)
         {
@@ -100,14 +94,14 @@ public class Projectile
         }
     }
 
-    public void Draw(SpriteBatch sb, Texture2D pixel)
+    public void Draw(SpriteBatch sb, SpriteSet sprites)
     {
         if (!IsActive) return;
 
-        // rockets are bigger
-        int s = Source == TowerType.Rocket ? 8 : (Source == TowerType.Flame ? 6 : 5);
-        sb.Draw(pixel,
+        var tex = sprites.Projectiles[Source];
+        int s = Source == TowerType.Rocket ? 12 : (Source == TowerType.Flame ? 10 : 8);
+        sb.Draw(tex,
             new Rectangle((int)(Position.X - s / 2f), (int)(Position.Y - s / 2f), s, s),
-            Color);
+            Color.White);
     }
 }

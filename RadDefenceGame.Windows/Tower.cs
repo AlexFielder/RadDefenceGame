@@ -17,17 +17,23 @@ public class Tower
     public float FireRate { get; private set; }
     public Color Color { get; }
 
-    // flame-specific: burn stats scale with upgrades
     public float BurnDps { get; private set; }
     public float BurnDuration { get; private set; }
-
-    // rocket-specific: splash radius
     public float SplashRadius { get; private set; }
 
     public int TotalInvested { get; private set; }
     public bool PlacedDuringPrep { get; set; } = true;
 
     private float _cooldown;
+
+    private static readonly Dictionary<TowerType, string> FireSounds = new()
+    {
+        { TowerType.Basic, "tower_gun" },
+        { TowerType.Sniper, "tower_sniper" },
+        { TowerType.Rapid, "tower_rapid" },
+        { TowerType.Rocket, "tower_rocket" },
+        { TowerType.Flame, "tower_flame" },
+    };
 
     public Tower(int col, int row, TowerType type)
     {
@@ -45,8 +51,6 @@ public class Tower
         SplashRadius = stats.splashRadius;
         TotalInvested = GetCost(type);
     }
-
-    // -- static helpers --
 
     public static int GetCost(TowerType t) => t switch
     {
@@ -83,10 +87,7 @@ public class Tower
         _ => new(100f, 20f, 1f, Color.White, 0, 0, 0)
     };
 
-    // -- upgrades --
-
     public bool CanUpgrade => Level < GameSettings.MaxTowerLevel;
-
     public int UpgradeCost => (int)(GetCost(Type) * GameSettings.UpgradeCostMultiplier);
 
     public void Upgrade()
@@ -97,26 +98,20 @@ public class Tower
         Range *= GameSettings.UpgradeRangeMultiplier;
         FireRate *= GameSettings.UpgradeFireRateMultiplier;
 
-        // flame burn also scales
         if (Type == TowerType.Flame)
         {
             BurnDps *= GameSettings.UpgradeDamageMultiplier;
             BurnDuration += 0.5f;
         }
 
-        // rocket splash grows slightly
         if (Type == TowerType.Rocket)
             SplashRadius *= 1.15f;
 
         TotalInvested += UpgradeCost;
     }
 
-    // -- sell value --
-
     public int FullRefundValue => TotalInvested;
     public int SellValue => (int)(TotalInvested * GameSettings.SellRefundRatio);
-
-    // -- game logic --
 
     public void Update(GameTime gameTime, List<Enemy> enemies, List<Projectile> projectiles)
     {
@@ -142,18 +137,19 @@ public class Tower
             var proj = new Projectile(WorldPos, best, Damage, Type,
                 BurnDps, BurnDuration, SplashRadius);
 
-            // rocket needs access to enemy list for splash
             if (Type == TowerType.Rocket)
                 proj.SetEnemyList(enemies);
 
             projectiles.Add(proj);
             _cooldown = 1f / FireRate;
+
+            // play firing sound
+            if (FireSounds.TryGetValue(Type, out var soundName))
+                AudioManager.Instance.PlayVaried(soundName, 0.5f, 0.08f);
         }
     }
 
-    // -- drawing --
-
-    public void Draw(SpriteBatch sb, Texture2D pixel, bool selected)
+    public void Draw(SpriteBatch sb, SpriteSet sprites, bool selected)
     {
         int pad = 4;
         int size = GameSettings.CellSize - pad;
@@ -162,34 +158,16 @@ public class Tower
             (int)(WorldPos.Y - size / 2f),
             size, size);
 
-        sb.Draw(pixel, rect, Color);
+        var tex = sprites.Towers[Type];
+        sb.Draw(tex, rect, Color.White);
 
-        Color dark = new(Color.R / 3, Color.G / 3, Color.B / 3);
-        int b = 2;
-        sb.Draw(pixel, new Rectangle(rect.X, rect.Y, rect.Width, b), dark);
-        sb.Draw(pixel, new Rectangle(rect.X, rect.Bottom - b, rect.Width, b), dark);
-        sb.Draw(pixel, new Rectangle(rect.X, rect.Y, b, rect.Height), dark);
-        sb.Draw(pixel, new Rectangle(rect.Right - b, rect.Y, b, rect.Height), dark);
-
-        // turret pip -- bigger per level
-        int pip = 4 + Level * 2;
-        Color pipColor = Type switch
-        {
-            TowerType.Flame => Color.Yellow,
-            TowerType.Rocket => Color.White,
-            _ => Color.White
-        };
-        sb.Draw(pixel, new Rectangle(
-            (int)(WorldPos.X - pip / 2f), (int)(WorldPos.Y - pip / 2f), pip, pip), pipColor);
-
-        // level stars
         if (Level > 1)
         {
             for (int i = 0; i < Level - 1; i++)
             {
-                int sx = rect.X + 3 + i * 6;
-                int sy = rect.Bottom - 6;
-                sb.Draw(pixel, new Rectangle(sx, sy, 4, 4), Color.Gold);
+                int sx = rect.X + 3 + i * 7;
+                int sy = rect.Bottom - 7;
+                sb.Draw(sprites.Pixel, new Rectangle(sx, sy, 5, 5), Color.Gold);
             }
         }
     }

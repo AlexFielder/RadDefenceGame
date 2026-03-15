@@ -5,6 +5,7 @@ using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using System;
 using System.Collections.Generic;
+using System.IO;
 
 public enum GameScreen
 {
@@ -19,10 +20,8 @@ public class Game1 : Game
     private readonly GraphicsDeviceManager _graphics;
     private SpriteBatch _spriteBatch = null!;
 
-    // -- textures --
-    private Texture2D _pixel = null!;
-    private Texture2D _circle = null!;
-    private Texture2D _ring = null!;
+    // -- sprites --
+    private SpriteSet _sprites = null!;
     private SpriteFont _font = null!;
 
     // -- game systems --
@@ -44,6 +43,7 @@ public class Game1 : Game
     private readonly List<ToolbarButton> _toolbar = new();
     private ToolbarButton? _speedButton;
     private ToolbarButton? _autoStartButton;
+    private ToolbarButton? _muteButton;
     private readonly ContextMenu _contextMenu = new();
 
     // -- persistent player preferences --
@@ -53,6 +53,7 @@ public class Game1 : Game
     private GameScreen _screen = GameScreen.Title;
     private string _seedInput = "";
     private bool _seedInputActive;
+    private bool _gameOverSoundPlayed;
 
     public Game1()
     {
@@ -78,11 +79,15 @@ public class Game1 : Game
         _spriteBatch = new SpriteBatch(GraphicsDevice);
         _font = Content.Load<SpriteFont>("Score");
 
-        _pixel = new Texture2D(GraphicsDevice, 1, 1);
-        _pixel.SetData(new[] { Color.White });
+        var pixel = new Texture2D(GraphicsDevice, 1, 1);
+        pixel.SetData(new[] { Color.White });
+        var ring = CreateRing(64, 2);
+        _sprites = new SpriteSet(Content, pixel, ring);
 
-        _circle = CreateCircle(32);
-        _ring = CreateRing(64, 2);
+        // load audio from Content/Audio folder (WAV files loaded directly, no MGCB needed)
+        var audioPath = Path.Combine(Content.RootDirectory, "Audio");
+        AudioManager.Init();
+        AudioManager.Instance.LoadFromDirectory(audioPath);
 
         _seeds = new SeedManager();
         _seeds.NewRandomSeed();
@@ -95,7 +100,8 @@ public class Game1 : Game
         _state = new GameState();
         _state.AutoStartWaves = _autoStartPref;
         _waves = new WaveManager(_map);
-        _waves.OnWaveStarting += CommitPrepPlacements;
+        _waves.SetSprites(_sprites);
+        _waves.OnWaveStarting += OnWaveStarting;
         _enemies.Clear();
         _towers.Clear();
         _projectiles.Clear();
@@ -103,14 +109,18 @@ public class Game1 : Game
         _screen = GameScreen.Playing;
         _seedInput = "";
         _seedInputActive = false;
+        _gameOverSoundPlayed = false;
 
         BuildToolbar();
     }
 
-    private void CommitPrepPlacements()
+    private void OnWaveStarting()
     {
+        // commit towers
         foreach (var t in _towers)
             t.PlacedDuringPrep = false;
+
+        AudioManager.Instance.Play("wave_start", 0.8f);
     }
 
     private void BuildToolbar()
@@ -120,7 +130,6 @@ public class Game1 : Game
         int x = 10;
         int gap = 4;
 
-        // tower buttons: 1-5
         AddTowerButton(ref x, y, gap, "1:Gun $50", Keys.D1, TowerType.Basic,
             GameSettings.BasicTowerCost, new Color(0, 150, 255));
         AddTowerButton(ref x, y, gap, "2:Snpr $100", Keys.D2, TowerType.Sniper,
@@ -132,13 +141,12 @@ public class Game1 : Game
         AddTowerButton(ref x, y, gap, "5:Flm $125", Keys.D5, TowerType.Flame,
             GameSettings.FlameTowerCost, new Color(255, 140, 0));
 
-        x += 12; // spacer
+        x += 12;
 
-        // wall: W key
         _toolbar.Add(new ToolbarButton(
             new Rectangle(x, y, 80, 28),
             "W: Wall", Keys.W,
-            () => _state.Mode = PlacementMode.Wall,
+            () => { _state.Mode = PlacementMode.Wall; AudioManager.Instance.Play("ui_click", 0.4f); },
             () => _state.Mode == PlacementMode.Wall,
             () => _state.HasWalls(),
             new Color(160, 120, 200)));
@@ -149,7 +157,11 @@ public class Game1 : Game
         _speedButton = new ToolbarButton(
             new Rectangle(rx - 100, y, 100, 28),
             $"Speed {_state.SpeedLabel}", Keys.OemPlus,
-            () => { _state.CycleSpeed(); _speedButton!.SetLabel($"Speed {_state.SpeedLabel}"); },
+            () => {
+                _state.CycleSpeed();
+                _speedButton!.SetLabel($"Speed {_state.SpeedLabel}");
+                AudioManager.Instance.Play("ui_click", 0.4f);
+            },
             () => _state.Speed != GameSpeed.Normal,
             () => true,
             Color.Yellow);
@@ -165,11 +177,27 @@ public class Game1 : Game
                 _state.AutoStartWaves = !_state.AutoStartWaves;
                 _autoStartPref = _state.AutoStartWaves;
                 _autoStartButton!.SetLabel(_state.AutoStartWaves ? "Auto ON" : "Auto OFF");
+                AudioManager.Instance.Play("ui_click", 0.4f);
             },
             () => _state.AutoStartWaves,
             () => true,
             new Color(100, 180, 220));
         _toolbar.Add(_autoStartButton);
+        rx -= 90 + gap;
+
+        // mute button
+        _muteButton = new ToolbarButton(
+            new Rectangle(rx - 60, y, 60, 28),
+            "M: Snd", Keys.M,
+            () =>
+            {
+                AudioManager.Instance.ToggleMute();
+                _muteButton!.SetLabel(AudioManager.Instance.Muted ? "M: OFF" : "M: Snd");
+            },
+            () => AudioManager.Instance.Muted,
+            () => true,
+            new Color(180, 180, 180));
+        _toolbar.Add(_muteButton);
     }
 
     private void AddTowerButton(ref int x, int y, int gap, string label, Keys hotkey,
@@ -179,7 +207,11 @@ public class Game1 : Game
         _toolbar.Add(new ToolbarButton(
             new Rectangle(x, y, w, 28),
             label, hotkey,
-            () => { _state.Mode = PlacementMode.Tower; _state.SelectedTower = type; },
+            () => {
+                _state.Mode = PlacementMode.Tower;
+                _state.SelectedTower = type;
+                AudioManager.Instance.Play("ui_click", 0.4f);
+            },
             () => _state.Mode == PlacementMode.Tower && _state.SelectedTower == type,
             () => _state.Money >= cost,
             accent));
@@ -221,6 +253,9 @@ public class Game1 : Game
     {
         var kb = Keyboard.GetState();
         var mouse = Mouse.GetState();
+
+        // tick audio cooldowns (always, even on menus)
+        AudioManager.Instance.Update((float)gameTime.ElapsedGameTime.TotalSeconds);
 
         if (kb.IsKeyDown(Keys.Escape) && _screen == GameScreen.Playing)
         {
@@ -276,6 +311,7 @@ public class Game1 : Game
                 {
                     _seedInput = fav.Seed.ToString();
                     _seedInputActive = true;
+                    AudioManager.Instance.Play("ui_click", 0.4f);
                     break;
                 }
                 favY += 28;
@@ -302,6 +338,11 @@ public class Game1 : Game
         {
             _contextMenu.Close();
             _seeds.UpdateBest(_seeds.CurrentSeed, _state.Score, _waves.CurrentWave);
+            if (!_gameOverSoundPlayed)
+            {
+                AudioManager.Instance.Play("game_over", 0.8f);
+                _gameOverSoundPlayed = true;
+            }
             _screen = GameScreen.GameOver;
         }
     }
@@ -412,14 +453,14 @@ public class Game1 : Game
             {
                 items.Add(new ContextMenuItem(
                     $"Remove (${tower.FullRefundValue})",
-                    () => RemoveTower(tower, tower.FullRefundValue),
+                    () => { RemoveTower(tower, tower.FullRefundValue); AudioManager.Instance.Play("ui_sell", 0.6f); },
                     Color.LightGreen));
             }
             else
             {
                 items.Add(new ContextMenuItem(
                     $"Sell (${tower.SellValue})",
-                    () => RemoveTower(tower, tower.SellValue),
+                    () => { RemoveTower(tower, tower.SellValue); AudioManager.Instance.Play("ui_sell", 0.6f); },
                     Color.Tomato));
             }
 
@@ -434,7 +475,7 @@ public class Game1 : Game
                         : $"Upgrade Lv{tower.Level + 1} (${cost})";
                 items.Add(new ContextMenuItem(
                     desc,
-                    () => UpgradeTower(tower),
+                    () => { UpgradeTower(tower); AudioManager.Instance.Play("ui_upgrade", 0.6f); },
                     canAfford ? Color.Gold : new Color(80, 60, 0),
                     canAfford));
             }
@@ -448,7 +489,7 @@ public class Game1 : Game
             int col = _hoverCell.X, row = _hoverCell.Y;
             items.Add(new ContextMenuItem(
                 "Remove Wall (+1)",
-                () => RemovePlayerWall(col, row),
+                () => { RemovePlayerWall(col, row); AudioManager.Instance.Play("ui_click", 0.5f); },
                 new Color(160, 120, 200)));
         }
 
@@ -488,6 +529,7 @@ public class Game1 : Game
 
         _state.SpendTower();
         _map.PlaceTower(_hoverCell.X, _hoverCell.Y);
+        AudioManager.Instance.Play("ui_click", 0.5f);
 
         var tower = new Tower(_hoverCell.X, _hoverCell.Y, _state.SelectedTower);
         if (_waves.WaveActive)
@@ -502,6 +544,7 @@ public class Game1 : Game
 
         _state.SpendWall();
         _map.PlaceWall(_hoverCell.X, _hoverCell.Y);
+        AudioManager.Instance.Play("ui_click", 0.5f);
         NotifyEnemiesPathChanged();
     }
 
@@ -522,6 +565,7 @@ public class Game1 : Game
             if (e.ReachedEnd && !e.IsAlive)
             {
                 _state.LoseLife();
+                AudioManager.Instance.Play("life_lost", 0.7f, 0.1f);
                 e.ReachedEnd = false;
             }
         }
@@ -547,7 +591,17 @@ public class Game1 : Game
             if (!e.IsAlive)
             {
                 if (!e.ReachedEnd && e.Health <= 0)
+                {
                     _state.EarnReward(e.Reward);
+
+                    // death sound based on enemy reward (proxy for toughness)
+                    if (e.Reward > 25)
+                        AudioManager.Instance.PlayVaried("death_boss", 0.5f, 0.1f, 0.08f);
+                    else if (e.Reward > 15)
+                        AudioManager.Instance.PlayVaried("death_medium", 0.4f, 0.15f, 0.05f);
+                    else
+                        AudioManager.Instance.PlayVaried("death_small", 0.3f, 0.2f, 0.04f);
+                }
                 _enemies.RemoveAt(i);
             }
         }
@@ -610,31 +664,21 @@ public class Game1 : Game
             }
         }
 
-        DrawCentred("1-5: Towers | W: Wall | R-Click: Sell/Upgrade | SPACE: Wave | R: Restart | ESC: Menu",
+        DrawCentred("1-5: Towers | W: Wall | R-Click: Sell/Upgrade | SPACE: Wave | M: Mute | R: Restart",
             cx, GameSettings.ScreenHeight - 40, Color.DimGray);
     }
 
     private void DrawGame()
     {
-        _map.Draw(_spriteBatch, _pixel);
+        _map.Draw(_spriteBatch, _sprites);
         DrawPlacementGhost();
         DrawTowers();
         DrawEnemies();
         DrawProjectiles();
         DrawHUD();
         DrawToolbar();
-        _contextMenu.Draw(_spriteBatch, _pixel, _font);
+        _contextMenu.Draw(_spriteBatch, _sprites.Pixel, _font);
     }
-
-    private static Color GetTowerColor(TowerType t) => t switch
-    {
-        TowerType.Basic  => new Color(0, 150, 255),
-        TowerType.Sniper => new Color(255, 100, 0),
-        TowerType.Rapid  => new Color(0, 255, 100),
-        TowerType.Rocket => new Color(200, 50, 30),
-        TowerType.Flame  => new Color(255, 140, 0),
-        _ => Color.White
-    };
 
     private void DrawPlacementGhost()
     {
@@ -654,15 +698,15 @@ public class Game1 : Game
                     && _map.Grid[_hoverCell.X, _hoverCell.Y] != CellType.Wall)
                     return;
 
-                _spriteBatch.Draw(_pixel, rect, Color.Red * 0.2f);
+                _spriteBatch.Draw(_sprites.Pixel, rect, Color.Red * 0.2f);
                 return;
             }
 
-            Color ghost = GetTowerColor(_state.SelectedTower);
-            _spriteBatch.Draw(_pixel, rect, ghost * 0.45f);
+            var towerTex = _sprites.Towers[_state.SelectedTower];
+            _spriteBatch.Draw(towerTex, rect, Color.White * 0.5f);
 
             var tmp = new Tower(_hoverCell.X, _hoverCell.Y, _state.SelectedTower);
-            tmp.DrawRange(_spriteBatch, _ring);
+            tmp.DrawRange(_spriteBatch, _sprites.Ring);
         }
         else if (_state.Mode == PlacementMode.Wall)
         {
@@ -670,10 +714,10 @@ public class Game1 : Game
             {
                 if (_map.IsInBounds(_hoverCell.X, _hoverCell.Y)
                     && _map.Grid[_hoverCell.X, _hoverCell.Y] == CellType.Empty)
-                    _spriteBatch.Draw(_pixel, rect, Color.Red * 0.2f);
+                    _spriteBatch.Draw(_sprites.Pixel, rect, Color.Red * 0.2f);
                 return;
             }
-            _spriteBatch.Draw(_pixel, rect, new Color(160, 120, 200) * 0.5f);
+            _spriteBatch.Draw(_sprites.TileWall, rect, Color.White * 0.5f);
         }
     }
 
@@ -681,30 +725,30 @@ public class Game1 : Game
     {
         foreach (var t in _towers)
         {
-            t.Draw(_spriteBatch, _pixel, t == _hoveredTower);
+            t.Draw(_spriteBatch, _sprites, t == _hoveredTower);
             if (t == _hoveredTower)
-                t.DrawRange(_spriteBatch, _ring);
+                t.DrawRange(_spriteBatch, _sprites.Ring);
         }
     }
 
     private void DrawEnemies()
     {
         foreach (var e in _enemies)
-            e.Draw(_spriteBatch, _circle, _pixel);
+            e.Draw(_spriteBatch, _sprites.Pixel);
     }
 
     private void DrawProjectiles()
     {
         foreach (var p in _projectiles)
-            p.Draw(_spriteBatch, _pixel);
+            p.Draw(_spriteBatch, _sprites);
     }
 
     private void DrawHUD()
     {
-        _spriteBatch.Draw(_pixel,
+        _spriteBatch.Draw(_sprites.Pixel,
             new Rectangle(0, 0, GameSettings.ScreenWidth, GameSettings.UIHeight),
             new Color(20, 20, 35));
-        _spriteBatch.Draw(_pixel,
+        _spriteBatch.Draw(_sprites.Pixel,
             new Rectangle(0, GameSettings.UIHeight - 1, GameSettings.ScreenWidth, 1),
             new Color(50, 50, 80));
 
@@ -751,12 +795,12 @@ public class Game1 : Game
     private void DrawToolbar()
     {
         foreach (var btn in _toolbar)
-            btn.Draw(_spriteBatch, _pixel, _font);
+            btn.Draw(_spriteBatch, _sprites.Pixel, _font);
     }
 
     private void DrawGameOverOverlay()
     {
-        _spriteBatch.Draw(_pixel,
+        _spriteBatch.Draw(_sprites.Pixel,
             new Rectangle(0, 0, GameSettings.ScreenWidth, GameSettings.ScreenHeight),
             Color.Black * 0.75f);
 
@@ -786,22 +830,6 @@ public class Game1 : Game
 
     private bool JustPressed(KeyboardState kb, Keys key)
         => kb.IsKeyDown(key) && !_prevKb.IsKeyDown(key);
-
-    private Texture2D CreateCircle(int diameter)
-    {
-        var tex = new Texture2D(GraphicsDevice, diameter, diameter);
-        var data = new Color[diameter * diameter];
-        float r = diameter / 2f;
-        for (int y = 0; y < diameter; y++)
-            for (int x = 0; x < diameter; x++)
-            {
-                float dx = x - r + 0.5f, dy = y - r + 0.5f;
-                data[y * diameter + x] = MathF.Sqrt(dx * dx + dy * dy) <= r
-                    ? Color.White : Color.Transparent;
-            }
-        tex.SetData(data);
-        return tex;
-    }
 
     private Texture2D CreateRing(int diameter, int thickness)
     {

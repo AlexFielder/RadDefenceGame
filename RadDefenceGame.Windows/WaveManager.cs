@@ -13,11 +13,11 @@ public class WaveManager
     public float BreakTimer { get; private set; }
     public int LastWallGrant { get; private set; }
 
-    /// <summary>Fired when a wave is about to start. Use to commit towers etc.</summary>
     public event Action? OnWaveStarting;
 
     private readonly Map _map;
     private readonly Random _rng = new();
+    private SpriteSet? _sprites;
     private float _spawnTimer;
     private int _enemiesToSpawn;
     private float _spawnInterval;
@@ -30,6 +30,8 @@ public class WaveManager
     {
         _map = map;
     }
+
+    public void SetSprites(SpriteSet sprites) => _sprites = sprites;
 
     public void RequestStart()
     {
@@ -65,7 +67,6 @@ public class WaveManager
         {
             BreakTimer += (float)gameTime.ElapsedGameTime.TotalSeconds;
 
-            // only auto-start if the setting is enabled
             if (state.AutoStartWaves && BreakTimer >= AutoStartDelay)
                 StartNextWave();
 
@@ -80,7 +81,8 @@ public class WaveManager
             if (_spawnTimer <= 0 && _enemiesToSpawn > 0)
             {
                 int reward = GameSettings.KillBaseReward + CurrentWave;
-                enemies.Add(new Enemy(_map.CurrentPath, _enemyHealth, _enemySpeed, reward));
+                var sprite = _sprites?.GetEnemySprite(CurrentWave) ?? _sprites?.EnemyScout;
+                enemies.Add(new Enemy(_map.CurrentPath, _enemyHealth, _enemySpeed, reward, sprite!));
                 _enemiesToSpawn--;
                 _spawnTimer = _spawnInterval;
 

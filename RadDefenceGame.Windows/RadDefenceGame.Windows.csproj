@@ -32,18 +32,28 @@
     <Compile Include="ToolbarButton.cs" />
     <Compile Include="ContextMenu.cs" />
     <Compile Include="SeedManager.cs" />
+    <Compile Include="SpriteSet.cs" />
+    <Compile Include="AudioManager.cs" />
   </ItemGroup>
 
   <ItemGroup>
     <Content Include="Icon.ico" />
   </ItemGroup>
 
+  <!-- Copy Audio WAV files directly to output (bypasses MGCB) -->
+  <ItemGroup>
+    <None Include="Content\Audio\**\*.wav">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>Content\Audio\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </None>
+  </ItemGroup>
+
   <PropertyGroup>
     <AssemblyTitle>RadDefenceGame.Windows</AssemblyTitle>
     <Product>RadDefenceGame.Windows</Product>
     <Copyright>Copyright © 2019-2025</Copyright>
-    <AssemblyVersion>0.4.0.0</AssemblyVersion>
-    <FileVersion>0.4.0.0</FileVersion>
+    <AssemblyVersion>0.6.0.0</AssemblyVersion>
+    <FileVersion>0.6.0.0</FileVersion>
   </PropertyGroup>
 
   <Target Name="BuildContent" BeforeTargets="BeforeBuild">

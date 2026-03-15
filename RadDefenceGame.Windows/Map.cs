@@ -13,7 +13,6 @@ public class Map
     public List<Vector2> CurrentPath { get; private set; } = new();
     public int Seed { get; }
 
-    /// <summary>Tracks which wall cells were placed by the player (not seed-generated).</summary>
     public HashSet<Point> PlayerPlacedWalls { get; } = new();
 
     private static readonly Point[] Dirs = { new(1, 0), new(-1, 0), new(0, 1), new(0, -1) };
@@ -32,8 +31,6 @@ public class Map
         GenerateWalls(seed);
         RecalculatePath();
     }
-
-    // ── seeded wall generation ──────────────────────────────────────────
 
     private void GenerateWalls(int seed)
     {
@@ -65,8 +62,6 @@ public class Map
 
     private static int ManhattanDistance(int x1, int y1, int x2, int y2)
         => Math.Abs(x1 - x2) + Math.Abs(y1 - y2);
-
-    // ── pathfinding (BFS) ───────────────────────────────────────────────
 
     public bool RecalculatePath()
     {
@@ -131,8 +126,6 @@ public class Map
         return cell == CellType.Empty || cell == CellType.Spawn || cell == CellType.Exit;
     }
 
-    // ── placement ───────────────────────────────────────────────────────
-
     public bool CanPlaceWall(int col, int row)
     {
         if (!IsInBounds(col, row)) return false;
@@ -163,9 +156,6 @@ public class Map
         Grid[col, row] = CellType.Tower;
     }
 
-    // ── removal ─────────────────────────────────────────────────────────
-
-    /// <summary>Remove a player-placed wall, returning it to empty.</summary>
     public bool RemoveWall(int col, int row)
     {
         var pt = new Point(col, row);
@@ -177,17 +167,13 @@ public class Map
         return true;
     }
 
-    /// <summary>Remove a tower, restoring the cell to a wall.</summary>
     public void RemoveTower(int col, int row)
     {
         Grid[col, row] = CellType.Wall;
     }
 
-    /// <summary>Is this a player-placed wall (removable)?</summary>
     public bool IsPlayerWall(int col, int row)
         => PlayerPlacedWalls.Contains(new Point(col, row));
-
-    // ── coordinate helpers ──────────────────────────────────────────────
 
     public static Vector2 GridToWorld(int col, int row)
     {
@@ -206,9 +192,9 @@ public class Map
     public bool IsInBounds(int col, int row)
         => col >= 0 && col < GameSettings.GridCols && row >= 0 && row < GameSettings.GridRows;
 
-    // ── drawing ─────────────────────────────────────────────────────────
+    // -- drawing --
 
-    public void Draw(SpriteBatch sb, Texture2D pixel)
+    public void Draw(SpriteBatch sb, SpriteSet sprites)
     {
         var pathSet = new HashSet<Point>();
         foreach (var wp in CurrentPath)
@@ -224,37 +210,43 @@ public class Map
                     GameSettings.CellSize,
                     GameSettings.CellSize);
 
-                bool isPlayerWall = PlayerPlacedWalls.Contains(new Point(x, y));
+                var cell = Grid[x, y];
 
-                Color fill = Grid[x, y] switch
+                if (cell == CellType.Wall || cell == CellType.Tower)
                 {
-                    CellType.Wall  => isPlayerWall ? new Color(55, 45, 85) : new Color(45, 40, 65),
-                    CellType.Tower => new Color(20, 20, 30),
-                    CellType.Spawn => new Color(20, 50, 20),
-                    CellType.Exit  => new Color(70, 20, 20),
-                    _ => pathSet.Contains(new Point(x, y))
-                        ? new Color(22, 22, 40)
-                        : new Color(12, 12, 22)
-                };
+                    // wall tile sprite (tower cells also show wall underneath)
+                    bool isPlayer = PlayerPlacedWalls.Contains(new Point(x, y));
+                    Color wallTint = isPlayer ? new Color(200, 180, 255) : Color.White;
+                    sb.Draw(sprites.TileWall, rect, wallTint);
+                }
+                else if (cell == CellType.Spawn || cell == CellType.Exit || pathSet.Contains(new Point(x, y)))
+                {
+                    // path tile for walkable cells on the route
+                    sb.Draw(sprites.TilePath, rect, Color.White);
+                }
+                else
+                {
+                    // empty cells: dark floor
+                    sb.Draw(sprites.TilePath, rect, new Color(60, 60, 80));
+                }
 
-                sb.Draw(pixel, rect, fill);
-
-                sb.Draw(pixel, new Rectangle(rect.X, rect.Y, rect.Width, 1), new Color(25, 25, 45));
-                sb.Draw(pixel, new Rectangle(rect.X, rect.Y, 1, rect.Height), new Color(25, 25, 45));
+                // subtle grid lines on top
+                sb.Draw(sprites.Pixel, new Rectangle(rect.X, rect.Y, rect.Width, 1), new Color(25, 25, 45) * 0.5f);
+                sb.Draw(sprites.Pixel, new Rectangle(rect.X, rect.Y, 1, rect.Height), new Color(25, 25, 45) * 0.5f);
             }
         }
 
-        DrawCellMarker(sb, pixel, SpawnCell, new Color(60, 180, 60));
-        DrawCellMarker(sb, pixel, ExitCell, new Color(200, 60, 60));
+        DrawCellMarker(sb, sprites.Pixel, SpawnCell, new Color(60, 200, 60));
+        DrawCellMarker(sb, sprites.Pixel, ExitCell, new Color(220, 60, 60));
     }
 
     private static void DrawCellMarker(SpriteBatch sb, Texture2D pixel, Point cell, Color color)
     {
         var rect = new Rectangle(
-            cell.X * GameSettings.CellSize + 2,
-            cell.Y * GameSettings.CellSize + GameSettings.UIHeight + 2,
-            GameSettings.CellSize - 4,
-            GameSettings.CellSize - 4);
+            cell.X * GameSettings.CellSize + 1,
+            cell.Y * GameSettings.CellSize + GameSettings.UIHeight + 1,
+            GameSettings.CellSize - 2,
+            GameSettings.CellSize - 2);
 
         int b = 2;
         sb.Draw(pixel, new Rectangle(rect.X, rect.Y, rect.Width, b), color);
