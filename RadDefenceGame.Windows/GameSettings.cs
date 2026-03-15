@@ -1,5 +1,7 @@
 namespace RadDefenceGame.Windows;
 
+public enum Difficulty { Easy, Normal, Hard }
+
 public static class GameSettings
 {
     // Display
@@ -12,11 +14,18 @@ public static class GameSettings
     public const int GridRows = 15;
     public const int UIHeight = 80;
 
-    // Player starting values
+    // Player starting values (Normal)
     public const int StartingLives = 20;
     public const int StartingMoney = 100;
     public const int StartingWalls = 3;
     public const int KillBaseReward = 10;
+
+    // Difficulty multipliers
+    public static int GetStartingLives(Difficulty d) => d switch { Difficulty.Easy => 30, Difficulty.Hard => 10, _ => StartingLives };
+    public static int GetStartingMoney(Difficulty d) => d switch { Difficulty.Easy => 200, Difficulty.Hard => 75, _ => StartingMoney };
+    public static float GetEnemyHealthMultiplier(Difficulty d) => d switch { Difficulty.Easy => 0.7f, Difficulty.Hard => 1.4f, _ => 1f };
+    public static float GetEnemySpeedMultiplier(Difficulty d) => d switch { Difficulty.Easy => 0.9f, Difficulty.Hard => 1.1f, _ => 1f };
+    public static float GetRewardMultiplier(Difficulty d) => d switch { Difficulty.Easy => 1.3f, Difficulty.Hard => 0.75f, _ => 1f };
 
     // Tower costs
     public const int BasicTowerCost = 50;
@@ -65,11 +74,7 @@ public static class GameSettings
     public const float RepairDroneRepairRate = 40f;
     public const float RepairDroneRange = 400f;
     public const float MaxTowerHealth = 200f;
-
-    // Repair Tower: uncapped upgrades - cost triples each time
     public const float RepairUpgradeCostMultiplier = 3f;
-
-    // Auto-rebuild: 5x the destroyed tower's total investment
     public const float AutoRebuildCostMultiplier = 5f;
 
     // Wall grants per wave

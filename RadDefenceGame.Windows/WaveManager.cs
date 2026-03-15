@@ -31,6 +31,9 @@ public class WaveManager
     public void SetSprites(SpriteSet sprites) => _sprites = sprites;
     public void RequestStart() { if (!WaveActive) StartNextWave(); }
 
+    /// <summary>Set wave number directly (for loading saves). Sets to wave-1 so next StartNextWave increments to correct wave.</summary>
+    public void SetWave(int wave) { CurrentWave = wave; WaitingForPlayer = true; WaveActive = false; }
+
     private void StartNextWave()
     {
         OnWaveStarting?.Invoke();
@@ -72,7 +75,12 @@ public class WaveManager
         { int n = 1 + (CurrentWave - 13) / 4; for (int i = 0; i < n; i++) list.Add(new SpawnEntry(EnemyType.Kamikaze, _baseHealth * 0.6f, _baseSpeed * 1.2f, baseReward + 4)); }
 
         for (int i = list.Count - 1; i > 0; i--) { int j = _rng.Next(i + 1); (list[i], list[j]) = (list[j], list[i]); }
-        return list;
+
+        // apply difficulty multipliers
+        var result = new List<SpawnEntry>(list.Count);
+        foreach (var e in list)
+            result.Add(e); // multipliers applied at spawn time in Update via GameState.Difficulty
+        return result;
     }
 
     public void Update(GameTime gameTime, List<Enemy> enemies, GameState state)
@@ -89,8 +97,12 @@ public class WaveManager
             if (_spawnTimer <= 0 && _spawnQueue.Count > 0)
             {
                 var entry = _spawnQueue.Dequeue();
-                enemies.Add(new Enemy(_map.CurrentPath, entry.Health, entry.Speed,
-                    entry.Reward, _sprites!.GetSprite(entry.Type), entry.Type));
+                // apply difficulty scaling at spawn
+                float hpMul = GameSettings.GetEnemyHealthMultiplier(state.Difficulty);
+                float spdMul = GameSettings.GetEnemySpeedMultiplier(state.Difficulty);
+                float rwdMul = GameSettings.GetRewardMultiplier(state.Difficulty);
+                enemies.Add(new Enemy(_map.CurrentPath, entry.Health * hpMul, entry.Speed * spdMul,
+                    Math.Max(1, (int)(entry.Reward * rwdMul)), _sprites!.GetSprite(entry.Type), entry.Type));
                 _spawnTimer = interval;
                 if (_spawnQueue.Count == 0) IsSpawning = false;
             }

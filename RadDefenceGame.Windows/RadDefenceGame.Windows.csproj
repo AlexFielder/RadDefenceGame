@@ -39,6 +39,7 @@
     <Compile Include="SeedManager.cs" />
     <Compile Include="SpriteSet.cs" />
     <Compile Include="AudioManager.cs" />
+    <Compile Include="SaveManager.cs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -55,9 +56,9 @@
   <PropertyGroup>
     <AssemblyTitle>RadDefenceGame.Windows</AssemblyTitle>
     <Product>RadDefenceGame.Windows</Product>
-    <Copyright>Copyright © 2019-2026</Copyright>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>1.0.0.0</FileVersion>
+    <Copyright>Copyright © 2026</Copyright>
+    <AssemblyVersion>1.1.0.0</AssemblyVersion>
+    <FileVersion>1.1.0.0</FileVersion>
   </PropertyGroup>
 
   <Target Name="BuildContent" BeforeTargets="BeforeBuild">
