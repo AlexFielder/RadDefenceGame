@@ -101,13 +101,30 @@ public class Map
         return ok;
     }
 
+    /// <summary>Returns true if placing a wall here would change the current path.
+    /// Temporarily places the wall, computes the new path, compares waypoint-by-waypoint.</summary>
+    public bool WouldAlterPath(int col, int row)
+    {
+        if (!IsInBounds(col, row) || Grid[col, row] != CellType.Empty) return true;
+        Grid[col, row] = CellType.Wall;
+        var newPath = FindPath(SpawnCell, ExitCell);
+        Grid[col, row] = CellType.Empty;
+        if (newPath == null) return true; // would block entirely
+        if (newPath.Count != CurrentPath.Count) return true;
+        for (int i = 0; i < newPath.Count; i++)
+        {
+            var wp = GridToWorld(newPath[i].X, newPath[i].Y);
+            if (wp != CurrentPath[i]) return true;
+        }
+        return false;
+    }
+
     public bool CanPlaceTower(int col, int row)
     {
         if (!IsInBounds(col, row)) return false;
         return Grid[col, row] == CellType.Wall;
     }
 
-    /// <summary>Check if a 2x2 area starting at (col,row) is all walls and fits in bounds.</summary>
     public bool CanPlace2x2Tower(int col, int row)
     {
         for (int dx = 0; dx < 2; dx++)
@@ -120,7 +137,6 @@ public class Map
         return true;
     }
 
-    /// <summary>Place a 2x2 tower. Marks all 4 cells as Tower. Anchor = top-left.</summary>
     public void Place2x2Tower(int col, int row)
     {
         for (int dx = 0; dx < 2; dx++)
@@ -128,7 +144,6 @@ public class Map
                 Grid[col + dx, row + dy] = CellType.Tower;
     }
 
-    /// <summary>Remove a 2x2 tower. Reverts all 4 cells to Wall.</summary>
     public void Remove2x2Tower(int col, int row)
     {
         for (int dx = 0; dx < 2; dx++)
