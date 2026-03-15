@@ -24,6 +24,9 @@ public static class GameSettings
     public const int RapidTowerCost = 75;
     public const int RocketTowerCost = 150;
     public const int FlameTowerCost = 125;
+    public const int TeslaTowerCost = 120;
+    public const int TachyonTowerCost = 100;
+    public const int GrinderTowerCost = 200;
 
     // Selling
     public const float SellRefundRatio = 0.5f;
@@ -41,6 +44,18 @@ public static class GameSettings
 
     // Rocket splash
     public const float RocketSplashRadius = 50f;
+
+    // Tesla Array - vulnerability debuff
+    public const float TeslaVulnerabilityBonus = 0.25f; // +25% damage from all sources
+    public const float TeslaVulnerabilityDuration = 3f;
+
+    // Tachyon Warp - slow debuff
+    public const float TachyonSlowFactor = 0.5f; // 50% speed
+    public const float TachyonSlowDuration = 2.5f;
+
+    // Parts Grinder - bonus credits
+    public const float GrinderBonusCreditRatio = 0.5f; // +50% credits from nearby kills
+    public const float GrinderRange = 100f;
 
     // Wall grants per wave (min, max)
     public const int WallGrantMin = 1;

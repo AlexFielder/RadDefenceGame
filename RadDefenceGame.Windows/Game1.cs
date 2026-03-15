@@ -84,7 +84,6 @@ public class Game1 : Game
         var ring = CreateRing(64, 2);
         _sprites = new SpriteSet(Content, pixel, ring);
 
-        // load audio from Content/Audio folder (WAV files loaded directly, no MGCB needed)
         var audioPath = Path.Combine(Content.RootDirectory, "Audio");
         AudioManager.Init();
         AudioManager.Instance.LoadFromDirectory(audioPath);
@@ -116,10 +115,8 @@ public class Game1 : Game
 
     private void OnWaveStarting()
     {
-        // commit towers
         foreach (var t in _towers)
             t.PlacedDuringPrep = false;
-
         AudioManager.Instance.Play("wave_start", 0.8f);
     }
 
@@ -128,24 +125,32 @@ public class Game1 : Game
         _toolbar.Clear();
         int y = 44;
         int x = 10;
-        int gap = 4;
+        int gap = 3;
+        int bw = 88; // button width (narrower to fit 8 towers)
 
-        AddTowerButton(ref x, y, gap, "1:Gun $50", Keys.D1, TowerType.Basic,
+        // 8 tower buttons: 1-8
+        AddTowerButton(ref x, y, gap, bw, "1:Gun $50", Keys.D1, TowerType.Basic,
             GameSettings.BasicTowerCost, new Color(0, 150, 255));
-        AddTowerButton(ref x, y, gap, "2:Snpr $100", Keys.D2, TowerType.Sniper,
+        AddTowerButton(ref x, y, gap, bw, "2:Snpr $100", Keys.D2, TowerType.Sniper,
             GameSettings.SniperTowerCost, new Color(255, 100, 0));
-        AddTowerButton(ref x, y, gap, "3:Rpd $75", Keys.D3, TowerType.Rapid,
+        AddTowerButton(ref x, y, gap, bw, "3:Rpd $75", Keys.D3, TowerType.Rapid,
             GameSettings.RapidTowerCost, new Color(0, 255, 100));
-        AddTowerButton(ref x, y, gap, "4:Rkt $150", Keys.D4, TowerType.Rocket,
+        AddTowerButton(ref x, y, gap, bw, "4:Rkt $150", Keys.D4, TowerType.Rocket,
             GameSettings.RocketTowerCost, new Color(200, 50, 30));
-        AddTowerButton(ref x, y, gap, "5:Flm $125", Keys.D5, TowerType.Flame,
+        AddTowerButton(ref x, y, gap, bw, "5:Flm $125", Keys.D5, TowerType.Flame,
             GameSettings.FlameTowerCost, new Color(255, 140, 0));
+        AddTowerButton(ref x, y, gap, bw, "6:Tsl $120", Keys.D6, TowerType.Tesla,
+            GameSettings.TeslaTowerCost, new Color(100, 220, 255));
+        AddTowerButton(ref x, y, gap, bw, "7:Tch $100", Keys.D7, TowerType.Tachyon,
+            GameSettings.TachyonTowerCost, new Color(220, 200, 50));
+        AddTowerButton(ref x, y, gap, bw, "8:Grd $200", Keys.D8, TowerType.Grinder,
+            GameSettings.GrinderTowerCost, new Color(200, 80, 80));
 
-        x += 12;
+        x += 8; // spacer
 
         _toolbar.Add(new ToolbarButton(
-            new Rectangle(x, y, 80, 28),
-            "W: Wall", Keys.W,
+            new Rectangle(x, y, 70, 28),
+            "W:Wall", Keys.W,
             () => { _state.Mode = PlacementMode.Wall; AudioManager.Instance.Play("ui_click", 0.4f); },
             () => _state.Mode == PlacementMode.Wall,
             () => _state.HasWalls(),
@@ -155,22 +160,22 @@ public class Game1 : Game
         int rx = GameSettings.ScreenWidth - 10;
 
         _speedButton = new ToolbarButton(
-            new Rectangle(rx - 100, y, 100, 28),
-            $"Speed {_state.SpeedLabel}", Keys.OemPlus,
+            new Rectangle(rx - 90, y, 90, 28),
+            $"Spd {_state.SpeedLabel}", Keys.OemPlus,
             () => {
                 _state.CycleSpeed();
-                _speedButton!.SetLabel($"Speed {_state.SpeedLabel}");
+                _speedButton!.SetLabel($"Spd {_state.SpeedLabel}");
                 AudioManager.Instance.Play("ui_click", 0.4f);
             },
             () => _state.Speed != GameSpeed.Normal,
             () => true,
             Color.Yellow);
         _toolbar.Add(_speedButton);
-        rx -= 100 + gap;
+        rx -= 90 + gap;
 
         string autoLabel = _state.AutoStartWaves ? "Auto ON" : "Auto OFF";
         _autoStartButton = new ToolbarButton(
-            new Rectangle(rx - 90, y, 90, 28),
+            new Rectangle(rx - 80, y, 80, 28),
             autoLabel, null,
             () =>
             {
@@ -183,16 +188,15 @@ public class Game1 : Game
             () => true,
             new Color(100, 180, 220));
         _toolbar.Add(_autoStartButton);
-        rx -= 90 + gap;
+        rx -= 80 + gap;
 
-        // mute button
         _muteButton = new ToolbarButton(
-            new Rectangle(rx - 60, y, 60, 28),
-            "M: Snd", Keys.M,
+            new Rectangle(rx - 50, y, 50, 28),
+            "M:Snd", Keys.M,
             () =>
             {
                 AudioManager.Instance.ToggleMute();
-                _muteButton!.SetLabel(AudioManager.Instance.Muted ? "M: OFF" : "M: Snd");
+                _muteButton!.SetLabel(AudioManager.Instance.Muted ? "M:OFF" : "M:Snd");
             },
             () => AudioManager.Instance.Muted,
             () => true,
@@ -200,10 +204,9 @@ public class Game1 : Game
         _toolbar.Add(_muteButton);
     }
 
-    private void AddTowerButton(ref int x, int y, int gap, string label, Keys hotkey,
+    private void AddTowerButton(ref int x, int y, int gap, int w, string label, Keys hotkey,
         TowerType type, int cost, Color accent)
     {
-        int w = 100;
         _toolbar.Add(new ToolbarButton(
             new Rectangle(x, y, w, 28),
             label, hotkey,
@@ -254,7 +257,6 @@ public class Game1 : Game
         var kb = Keyboard.GetState();
         var mouse = Mouse.GetState();
 
-        // tick audio cooldowns (always, even on menus)
         AudioManager.Instance.Update((float)gameTime.ElapsedGameTime.TotalSeconds);
 
         if (kb.IsKeyDown(Keys.Escape) && _screen == GameScreen.Playing)
@@ -266,15 +268,9 @@ public class Game1 : Game
 
         switch (_screen)
         {
-            case GameScreen.Title:
-                UpdateTitle(kb, mouse);
-                break;
-            case GameScreen.Playing:
-                UpdatePlaying(gameTime, kb, mouse);
-                break;
-            case GameScreen.GameOver:
-                UpdateGameOver(kb, mouse);
-                break;
+            case GameScreen.Title: UpdateTitle(kb, mouse); break;
+            case GameScreen.Playing: UpdatePlaying(gameTime, kb, mouse); break;
+            case GameScreen.GameOver: UpdateGameOver(kb, mouse); break;
         }
 
         _prevMouse = mouse;
@@ -286,28 +282,24 @@ public class Game1 : Game
     {
         bool leftClick = mouse.LeftButton == ButtonState.Pressed && _prevMouse.LeftButton == ButtonState.Released;
 
-        if (JustPressed(kb, Keys.Tab))
-            _seedInputActive = !_seedInputActive;
+        if (JustPressed(kb, Keys.Tab)) _seedInputActive = !_seedInputActive;
 
         if (JustPressed(kb, Keys.Enter))
         {
             int seed = _seedInputActive && _seedInput.Length > 0
-                ? int.Parse(_seedInput)
-                : _seeds.CurrentSeed;
+                ? int.Parse(_seedInput) : _seeds.CurrentSeed;
             StartGame(seed);
             return;
         }
 
-        if (JustPressed(kb, Keys.Space) && !_seedInputActive)
-            _seeds.NewRandomSeed();
+        if (JustPressed(kb, Keys.Space) && !_seedInputActive) _seeds.NewRandomSeed();
 
         if (leftClick)
         {
             int favY = 420;
             foreach (var fav in _seeds.Favourites)
             {
-                var bounds = new Rectangle(440, favY - 2, 400, 24);
-                if (bounds.Contains(mouse.X, mouse.Y))
+                if (new Rectangle(440, favY - 2, 400, 24).Contains(mouse.X, mouse.Y))
                 {
                     _seedInput = fav.Seed.ToString();
                     _seedInputActive = true;
@@ -325,9 +317,7 @@ public class Game1 : Game
         if (!_state.IsGameOver)
         {
             HandleInput(kb, mouse);
-
             var scaledTime = ScaleGameTime(gameTime);
-
             _waves.Update(scaledTime, _enemies, _state);
             UpdateEnemies(scaledTime);
             UpdateTowers(scaledTime);
@@ -349,27 +339,10 @@ public class Game1 : Game
 
     private void UpdateGameOver(KeyboardState kb, MouseState mouse)
     {
-        if (JustPressed(kb, Keys.R))
-        {
-            StartGame(_seeds.CurrentSeed);
-            return;
-        }
-
-        if (JustPressed(kb, Keys.N))
-        {
-            _seeds.NewRandomSeed();
-            StartGame(_seeds.CurrentSeed);
-            return;
-        }
-
-        if (JustPressed(kb, Keys.F))
-            _seeds.ToggleFavourite(_seeds.CurrentSeed, _state.Score, _waves.CurrentWave);
-
-        if (JustPressed(kb, Keys.Escape))
-        {
-            _seeds.NewRandomSeed();
-            _screen = GameScreen.Title;
-        }
+        if (JustPressed(kb, Keys.R)) { StartGame(_seeds.CurrentSeed); return; }
+        if (JustPressed(kb, Keys.N)) { _seeds.NewRandomSeed(); StartGame(_seeds.CurrentSeed); return; }
+        if (JustPressed(kb, Keys.F)) _seeds.ToggleFavourite(_seeds.CurrentSeed, _state.Score, _waves.CurrentWave);
+        if (JustPressed(kb, Keys.Escape)) { _seeds.NewRandomSeed(); _screen = GameScreen.Title; }
     }
 
     private void HandleInput(KeyboardState kb, MouseState mouse)
@@ -378,61 +351,33 @@ public class Game1 : Game
         bool rightClick = mouse.RightButton == ButtonState.Pressed && _prevMouse.RightButton == ButtonState.Released;
 
         if (!_contextMenu.IsOpen)
-        {
             foreach (var btn in _toolbar)
                 if (btn.Hotkey.HasValue && JustPressed(kb, btn.Hotkey.Value))
                     btn.OnClick();
-        }
 
-        if (JustPressed(kb, Keys.R))
-        {
-            StartGame(_seeds.CurrentSeed);
-            return;
-        }
+        if (JustPressed(kb, Keys.R)) { StartGame(_seeds.CurrentSeed); return; }
 
-        if (leftClick && _contextMenu.IsOpen)
-        {
-            _contextMenu.HandleClick(mouse.X, mouse.Y);
-            return;
-        }
-
-        if ((leftClick || rightClick) && _contextMenu.IsOpen)
-        {
-            _contextMenu.Close();
-            if (leftClick) return;
-        }
+        if (leftClick && _contextMenu.IsOpen) { _contextMenu.HandleClick(mouse.X, mouse.Y); return; }
+        if ((leftClick || rightClick) && _contextMenu.IsOpen) { _contextMenu.Close(); if (leftClick) return; }
 
         if (leftClick)
-        {
             foreach (var btn in _toolbar)
-            {
-                if (btn.Bounds.Contains(mouse.X, mouse.Y))
-                {
-                    btn.OnClick();
-                    return;
-                }
-            }
-        }
+                if (btn.Bounds.Contains(mouse.X, mouse.Y)) { btn.OnClick(); return; }
 
-        if (JustPressed(kb, Keys.Space))
-            _waves.RequestStart();
+        if (JustPressed(kb, Keys.Space)) _waves.RequestStart();
 
         _hoverCell = Map.WorldToGrid(new Vector2(mouse.X, mouse.Y));
-
         _hoveredTower = null;
         foreach (var t in _towers)
             if (t.GridPos == _hoverCell) { _hoveredTower = t; break; }
 
         if (leftClick && mouse.Y > GameSettings.UIHeight)
         {
-            if (_state.Mode == PlacementMode.Tower)
-                TryPlaceTower();
-            else if (_state.Mode == PlacementMode.Wall)
-                TryPlaceWall();
+            if (_state.Mode == PlacementMode.Tower) TryPlaceTower();
+            else if (_state.Mode == PlacementMode.Wall) TryPlaceWall();
         }
 
-        if (rightClick && mouse.Y > GameSettings.UIHeight)
-            HandleRightClick(mouse);
+        if (rightClick && mouse.Y > GameSettings.UIHeight) HandleRightClick(mouse);
     }
 
     // --- RIGHT-CLICK CONTEXT MENU ---
@@ -450,45 +395,39 @@ public class Game1 : Game
             var tower = _hoveredTower;
 
             if (betweenWaves && tower.PlacedDuringPrep)
-            {
-                items.Add(new ContextMenuItem(
-                    $"Remove (${tower.FullRefundValue})",
+                items.Add(new ContextMenuItem($"Remove (${tower.FullRefundValue})",
                     () => { RemoveTower(tower, tower.FullRefundValue); AudioManager.Instance.Play("ui_sell", 0.6f); },
                     Color.LightGreen));
-            }
             else
-            {
-                items.Add(new ContextMenuItem(
-                    $"Sell (${tower.SellValue})",
+                items.Add(new ContextMenuItem($"Sell (${tower.SellValue})",
                     () => { RemoveTower(tower, tower.SellValue); AudioManager.Instance.Play("ui_sell", 0.6f); },
                     Color.Tomato));
-            }
 
             if (tower.CanUpgrade)
             {
                 int cost = tower.UpgradeCost;
                 bool canAfford = _state.Money >= cost;
-                string desc = tower.Type == TowerType.Flame
-                    ? $"Upgrade Lv{tower.Level + 1} (${cost}) +DMG/Burn"
-                    : tower.Type == TowerType.Rocket
-                        ? $"Upgrade Lv{tower.Level + 1} (${cost}) +DMG/Splash"
-                        : $"Upgrade Lv{tower.Level + 1} (${cost})";
-                items.Add(new ContextMenuItem(
-                    desc,
+                string desc = tower.Type switch
+                {
+                    TowerType.Flame => $"Upgrade Lv{tower.Level + 1} (${cost}) +Burn",
+                    TowerType.Rocket => $"Upgrade Lv{tower.Level + 1} (${cost}) +Splash",
+                    TowerType.Tesla => $"Upgrade Lv{tower.Level + 1} (${cost}) +Vuln",
+                    TowerType.Tachyon => $"Upgrade Lv{tower.Level + 1} (${cost}) +Slow",
+                    _ => $"Upgrade Lv{tower.Level + 1} (${cost})"
+                };
+                items.Add(new ContextMenuItem(desc,
                     () => { UpgradeTower(tower); AudioManager.Instance.Play("ui_upgrade", 0.6f); },
-                    canAfford ? Color.Gold : new Color(80, 60, 0),
-                    canAfford));
+                    canAfford ? Color.Gold : new Color(80, 60, 0), canAfford));
             }
+            else if (tower.Type == TowerType.Grinder)
+                items.Add(new ContextMenuItem("Not upgradeable", () => { }, Color.DimGray, false));
             else
-            {
                 items.Add(new ContextMenuItem("Max Level", () => { }, Color.DimGray, false));
-            }
         }
         else if (cell == CellType.Wall && betweenWaves && _map.IsPlayerWall(_hoverCell.X, _hoverCell.Y))
         {
             int col = _hoverCell.X, row = _hoverCell.Y;
-            items.Add(new ContextMenuItem(
-                "Remove Wall (+1)",
+            items.Add(new ContextMenuItem("Remove Wall (+1)",
                 () => { RemovePlayerWall(col, row); AudioManager.Instance.Play("ui_click", 0.5f); },
                 new Color(160, 120, 200)));
         }
@@ -507,9 +446,8 @@ public class Game1 : Game
 
     private void UpgradeTower(Tower tower)
     {
-        int cost = tower.UpgradeCost;
-        if (_state.Money < cost) return;
-        _state.Money -= cost;
+        if (_state.Money < tower.UpgradeCost) return;
+        _state.Money -= tower.UpgradeCost;
         tower.Upgrade();
     }
 
@@ -532,8 +470,7 @@ public class Game1 : Game
         AudioManager.Instance.Play("ui_click", 0.5f);
 
         var tower = new Tower(_hoverCell.X, _hoverCell.Y, _state.SelectedTower);
-        if (_waves.WaveActive)
-            tower.PlacedDuringPrep = false;
+        if (_waves.WaveActive) tower.PlacedDuringPrep = false;
         _towers.Add(tower);
     }
 
@@ -551,8 +488,7 @@ public class Game1 : Game
     private void NotifyEnemiesPathChanged()
     {
         foreach (var e in _enemies)
-            if (e.IsAlive)
-                e.UpdatePath(_map.CurrentPath);
+            if (e.IsAlive) e.UpdatePath(_map.CurrentPath);
     }
 
     // --- SIMULATION ---
@@ -592,9 +528,27 @@ public class Game1 : Game
             {
                 if (!e.ReachedEnd && e.Health <= 0)
                 {
-                    _state.EarnReward(e.Reward);
+                    int reward = e.Reward;
 
-                    // death sound based on enemy reward (proxy for toughness)
+                    // Parts Grinder bonus: check if any grinders are nearby
+                    float grindBonus = 0f;
+                    foreach (var t in _towers)
+                    {
+                        if (t.Type != TowerType.Grinder) continue;
+                        float dist = Vector2.Distance(t.WorldPos, e.Position);
+                        if (dist <= t.Range)
+                        {
+                            grindBonus = Math.Max(grindBonus, t.GrinderBonusRatio);
+                        }
+                    }
+
+                    int totalReward = reward + (int)(reward * grindBonus);
+                    _state.EarnReward(totalReward);
+
+                    if (grindBonus > 0)
+                        AudioManager.Instance.PlayVaried("tower_grinder", 0.3f, 0.15f, 0.1f);
+
+                    // death sound
                     if (e.Reward > 25)
                         AudioManager.Instance.PlayVaried("death_boss", 0.5f, 0.1f, 0.08f);
                     else if (e.Reward > 15)
@@ -617,16 +571,9 @@ public class Game1 : Game
 
         switch (_screen)
         {
-            case GameScreen.Title:
-                DrawTitle();
-                break;
-            case GameScreen.Playing:
-                DrawGame();
-                break;
-            case GameScreen.GameOver:
-                DrawGame();
-                DrawGameOverOverlay();
-                break;
+            case GameScreen.Title: DrawTitle(); break;
+            case GameScreen.Playing: DrawGame(); break;
+            case GameScreen.GameOver: DrawGame(); DrawGameOverOverlay(); break;
         }
 
         _spriteBatch.End();
@@ -652,19 +599,17 @@ public class Game1 : Game
         if (_seeds.Favourites.Count > 0)
         {
             DrawCentred("--- Favourites (click to load) ---", cx, 380, new Color(160, 120, 200));
-
             int y = 420;
             foreach (var fav in _seeds.Favourites)
             {
                 string star = _seeds.CurrentSeed == fav.Seed ? "> " : "  ";
-                string line = $"{star}Seed {fav.Seed}  |  Best: {fav.BestScore} pts  Wave {fav.BestWave}";
-                DrawCentred(line, cx, y, Color.LightGray);
+                DrawCentred($"{star}Seed {fav.Seed}  |  Best: {fav.BestScore} pts  Wave {fav.BestWave}", cx, y, Color.LightGray);
                 y += 28;
                 if (y > 600) break;
             }
         }
 
-        DrawCentred("1-5: Towers | W: Wall | R-Click: Sell/Upgrade | SPACE: Wave | M: Mute | R: Restart",
+        DrawCentred("1-8: Towers | W: Wall | R-Click: Sell/Upgrade | SPACE: Wave | M: Mute | R: Restart",
             cx, GameSettings.ScreenHeight - 40, Color.DimGray);
     }
 
@@ -687,17 +632,14 @@ public class Game1 : Game
 
         var pos = Map.GridToWorld(_hoverCell.X, _hoverCell.Y);
         int size = GameSettings.CellSize - 4;
-        var rect = new Rectangle(
-            (int)(pos.X - size / 2f), (int)(pos.Y - size / 2f), size, size);
+        var rect = new Rectangle((int)(pos.X - size / 2f), (int)(pos.Y - size / 2f), size, size);
 
         if (_state.Mode == PlacementMode.Tower)
         {
             if (!_map.CanPlaceTower(_hoverCell.X, _hoverCell.Y) || !_state.CanAffordTower())
             {
                 if (_map.IsInBounds(_hoverCell.X, _hoverCell.Y)
-                    && _map.Grid[_hoverCell.X, _hoverCell.Y] != CellType.Wall)
-                    return;
-
+                    && _map.Grid[_hoverCell.X, _hoverCell.Y] != CellType.Wall) return;
                 _spriteBatch.Draw(_sprites.Pixel, rect, Color.Red * 0.2f);
                 return;
             }
@@ -726,34 +668,26 @@ public class Game1 : Game
         foreach (var t in _towers)
         {
             t.Draw(_spriteBatch, _sprites, t == _hoveredTower);
-            if (t == _hoveredTower)
-                t.DrawRange(_spriteBatch, _sprites.Ring);
+            if (t == _hoveredTower) t.DrawRange(_spriteBatch, _sprites.Ring);
         }
     }
 
     private void DrawEnemies()
     {
-        foreach (var e in _enemies)
-            e.Draw(_spriteBatch, _sprites.Pixel);
+        foreach (var e in _enemies) e.Draw(_spriteBatch, _sprites.Pixel);
     }
 
     private void DrawProjectiles()
     {
-        foreach (var p in _projectiles)
-            p.Draw(_spriteBatch, _sprites);
+        foreach (var p in _projectiles) p.Draw(_spriteBatch, _sprites);
     }
 
     private void DrawHUD()
     {
-        _spriteBatch.Draw(_sprites.Pixel,
-            new Rectangle(0, 0, GameSettings.ScreenWidth, GameSettings.UIHeight),
-            new Color(20, 20, 35));
-        _spriteBatch.Draw(_sprites.Pixel,
-            new Rectangle(0, GameSettings.UIHeight - 1, GameSettings.ScreenWidth, 1),
-            new Color(50, 50, 80));
+        _spriteBatch.Draw(_sprites.Pixel, new Rectangle(0, 0, GameSettings.ScreenWidth, GameSettings.UIHeight), new Color(20, 20, 35));
+        _spriteBatch.Draw(_sprites.Pixel, new Rectangle(0, GameSettings.UIHeight - 1, GameSettings.ScreenWidth, 1), new Color(50, 50, 80));
 
         float y1 = 6;
-
         _spriteBatch.DrawString(_font, $"Lives: {_state.Lives}", new Vector2(10, y1), Color.Tomato);
         _spriteBatch.DrawString(_font, $"${_state.Money}", new Vector2(150, y1), Color.Gold);
         _spriteBatch.DrawString(_font, $"Score: {_state.Score}", new Vector2(260, y1), Color.White);
@@ -761,62 +695,42 @@ public class Game1 : Game
 
         string seedText = $"Seed: {_seeds.CurrentSeed}";
         var seedSize = _font.MeasureString(seedText);
-        _spriteBatch.DrawString(_font, seedText,
-            new Vector2(GameSettings.ScreenWidth - seedSize.X - 10, y1), Color.DimGray);
+        _spriteBatch.DrawString(_font, seedText, new Vector2(GameSettings.ScreenWidth - seedSize.X - 10, y1), Color.DimGray);
 
         string wave;
         if (_waves.WaveActive)
-        {
             wave = $"Wave {_waves.CurrentWave}  (R-click towers to sell/upgrade)";
-        }
         else if (_waves.CurrentWave == 0)
-        {
             wave = "Place towers on walls, then SPACE to start";
-        }
         else
         {
             string cleared = $"Wave {_waves.CurrentWave} cleared! +{_waves.LastWallGrant} walls  R-click to edit";
-            if (_state.AutoStartWaves)
-            {
-                float remaining = Math.Max(0, 10 - _waves.BreakTimer);
-                wave = $"{cleared}  Next in {remaining:0}s  [SPACE]";
-            }
-            else
-            {
-                wave = $"{cleared}  Press SPACE when ready";
-            }
+            wave = _state.AutoStartWaves
+                ? $"{cleared}  Next in {Math.Max(0, 10 - _waves.BreakTimer):0}s  [SPACE]"
+                : $"{cleared}  Press SPACE when ready";
         }
 
         var waveSize = _font.MeasureString(wave);
-        _spriteBatch.DrawString(_font, wave,
-            new Vector2((GameSettings.ScreenWidth - waveSize.X) / 2f, y1), Color.CornflowerBlue);
+        _spriteBatch.DrawString(_font, wave, new Vector2((GameSettings.ScreenWidth - waveSize.X) / 2f, y1), Color.CornflowerBlue);
     }
 
     private void DrawToolbar()
     {
-        foreach (var btn in _toolbar)
-            btn.Draw(_spriteBatch, _sprites.Pixel, _font);
+        foreach (var btn in _toolbar) btn.Draw(_spriteBatch, _sprites.Pixel, _font);
     }
 
     private void DrawGameOverOverlay()
     {
-        _spriteBatch.Draw(_sprites.Pixel,
-            new Rectangle(0, 0, GameSettings.ScreenWidth, GameSettings.ScreenHeight),
-            Color.Black * 0.75f);
+        _spriteBatch.Draw(_sprites.Pixel, new Rectangle(0, 0, GameSettings.ScreenWidth, GameSettings.ScreenHeight), Color.Black * 0.75f);
 
         float cx = GameSettings.ScreenWidth / 2f;
         float y = GameSettings.ScreenHeight / 2f - 80;
 
-        DrawCentred("GAME OVER", cx, y, Color.Red);
-        y += 40;
-        DrawCentred($"Score: {_state.Score}  |  Wave: {_waves.CurrentWave}  |  Seed: {_seeds.CurrentSeed}", cx, y, Color.White);
-        y += 50;
+        DrawCentred("GAME OVER", cx, y, Color.Red); y += 40;
+        DrawCentred($"Score: {_state.Score}  |  Wave: {_waves.CurrentWave}  |  Seed: {_seeds.CurrentSeed}", cx, y, Color.White); y += 50;
 
         bool isFav = _seeds.IsFavourite(_seeds.CurrentSeed);
-        string favText = isFav ? "Favourited!" : "[F] Favourite this seed";
-        DrawCentred(favText, cx, y, isFav ? Color.Gold : new Color(160, 120, 200));
-        y += 40;
-
+        DrawCentred(isFav ? "Favourited!" : "[F] Favourite this seed", cx, y, isFav ? Color.Gold : new Color(160, 120, 200)); y += 40;
         DrawCentred("[R] Replay Same Seed    [N] New Random Seed    [ESC] Menu", cx, y, Color.LightGray);
     }
 

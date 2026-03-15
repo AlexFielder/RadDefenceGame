@@ -6,5 +6,8 @@ public enum TowerType
     Sniper,
     Rapid,
     Rocket,
-    Flame
+    Flame,
+    Tesla,
+    Tachyon,
+    Grinder
 }

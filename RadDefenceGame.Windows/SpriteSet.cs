@@ -4,7 +4,6 @@ using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
 using System.Collections.Generic;
 
-/// <summary>Holds all loaded sprite textures for the game.</summary>
 public class SpriteSet
 {
     // enemies
@@ -18,14 +17,14 @@ public class SpriteSet
     // towers
     public Dictionary<TowerType, Texture2D> Towers { get; } = new();
 
-    // projectiles
+    // projectiles (not all tower types have dedicated projectile sprites)
     public Dictionary<TowerType, Texture2D> Projectiles { get; } = new();
 
     // tiles
     public Texture2D TileWall { get; }
     public Texture2D TilePath { get; }
 
-    // utility (generated)
+    // utility
     public Texture2D Pixel { get; }
     public Texture2D Ring { get; }
 
@@ -46,21 +45,23 @@ public class SpriteSet
         Towers[TowerType.Rapid] = content.Load<Texture2D>("Images/tower_rapid");
         Towers[TowerType.Rocket] = content.Load<Texture2D>("Images/tower_rocket");
         Towers[TowerType.Flame] = content.Load<Texture2D>("Images/tower_flame");
+        Towers[TowerType.Tesla] = content.Load<Texture2D>("Images/tower_tesla_array");
+        Towers[TowerType.Tachyon] = content.Load<Texture2D>("Images/tower_tachyon_warp");
+        Towers[TowerType.Grinder] = content.Load<Texture2D>("Images/tower_parts_grinder");
 
         Projectiles[TowerType.Basic] = content.Load<Texture2D>("Images/proj_bullet");
         Projectiles[TowerType.Sniper] = content.Load<Texture2D>("Images/proj_sniper");
         Projectiles[TowerType.Rapid] = content.Load<Texture2D>("Images/proj_rapid");
         Projectiles[TowerType.Rocket] = content.Load<Texture2D>("Images/proj_rocket");
         Projectiles[TowerType.Flame] = content.Load<Texture2D>("Images/proj_flame");
+        // Tesla, Tachyon, and Grinder use coloured square fallback in Projectile.Draw
 
         TileWall = content.Load<Texture2D>("Images/tile_wall");
         TilePath = content.Load<Texture2D>("Images/tile_path");
     }
 
-    /// <summary>Get the default enemy sprite (scout). Enemy type variety coming later.</summary>
     public Texture2D GetEnemySprite(int waveNumber)
     {
-        // Scale enemy appearance with wave difficulty
         return waveNumber switch
         {
             <= 2 => EnemyScout,
