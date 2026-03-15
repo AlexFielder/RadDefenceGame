@@ -16,9 +16,10 @@ public class Enemy
     public int Reward { get; }
     public Texture2D Sprite { get; }
     public EnemyType Type { get; }
-
-    /// <summary>The tower type that last dealt damage. Used for kill attribution.</summary>
     public TowerType? LastDamageSource { get; private set; }
+
+    /// <summary>If true, this enemy is a child spawn (spreader/centipede) and should not spawn more on death.</summary>
+    public bool IsChild { get; set; }
 
     public float Speed => BaseSpeed * SlowMultiplier;
 
@@ -28,20 +29,29 @@ public class Enemy
     private float _burnDps;
     private TowerType _burnSource;
 
-    // -- slow (Tachyon Warp) --
+    // -- slow --
     public bool IsSlowed => _slowTimer > 0f;
     public float SlowMultiplier => IsSlowed ? _slowFactor : 1f;
     private float _slowTimer;
     private float _slowFactor = 1f;
 
-    // -- vulnerability (Tesla Array) --
+    // -- vulnerability --
     public bool IsVulnerable => _vulnTimer > 0f;
     public float VulnerabilityMultiplier => IsVulnerable ? (1f + _vulnBonus) : 1f;
     private float _vulnTimer;
     private float _vulnBonus;
 
+    // -- ability timers (used by Game1 for cross-object abilities) --
+    public float AbilityCooldown { get; set; }
+
+    // -- teleporter state --
+    private float _teleportTimer;
+
+    // -- path following --
     private int _currentWaypoint = 1;
     private List<Vector2> _path;
+    public int CurrentWaypoint => _currentWaypoint;
+    public List<Vector2> Path => _path;
 
     public Enemy(List<Vector2> path, float health, float speed, int reward,
         Texture2D sprite, EnemyType type)
@@ -54,20 +64,19 @@ public class Enemy
         Reward = reward;
         Sprite = sprite;
         Type = type;
+        AbilityCooldown = 0f;
+        _teleportTimer = GameSettings.TeleportCooldown;
     }
 
     public void UpdatePath(List<Vector2> newPath)
     {
         if (newPath.Count == 0) return;
-
-        float bestDist = float.MaxValue;
-        int bestIdx = 0;
+        float bestDist = float.MaxValue; int bestIdx = 0;
         for (int i = 0; i < newPath.Count; i++)
         {
             float d = Vector2.DistanceSquared(Position, newPath[i]);
             if (d < bestDist) { bestDist = d; bestIdx = i; }
         }
-
         _path = new List<Vector2>(newPath);
         _currentWaypoint = Math.Min(bestIdx + 1, _path.Count);
     }
@@ -80,12 +89,18 @@ public class Enemy
         if (Health <= 0f) { Health = 0f; IsAlive = false; }
     }
 
-    /// <summary>Raw damage (no vulnerability) with source tracking.</summary>
     public void TakeRawDamage(float damage, TowerType source)
     {
         Health -= damage;
         LastDamageSource = source;
         if (Health <= 0f) { Health = 0f; IsAlive = false; }
+    }
+
+    /// <summary>Heal this enemy (used by Medic). Cannot exceed max health.</summary>
+    public void Heal(float amount)
+    {
+        if (!IsAlive) return;
+        Health = MathF.Min(Health + amount, MaxHealth);
     }
 
     public void ApplyBurn(float dps, float duration, TowerType source)
@@ -113,6 +128,7 @@ public class Enemy
 
         float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
 
+        // tick debuffs
         if (_burnTimer > 0f)
         {
             _burnTimer -= dt;
@@ -120,19 +136,38 @@ public class Enemy
             if (!IsAlive) return;
             if (_burnTimer <= 0f) { _burnTimer = 0f; _burnDps = 0f; }
         }
-
         if (_slowTimer > 0f)
         {
             _slowTimer -= dt;
             if (_slowTimer <= 0f) { _slowTimer = 0f; _slowFactor = 1f; }
         }
-
         if (_vulnTimer > 0f)
         {
             _vulnTimer -= dt;
             if (_vulnTimer <= 0f) { _vulnTimer = 0f; _vulnBonus = 0f; }
         }
 
+        // tick ability cooldown (used by Game1 for medic/hacker/blaster)
+        if (AbilityCooldown > 0f) AbilityCooldown -= dt;
+
+        // teleporter: blink forward along path
+        if (Type == EnemyType.Teleporter)
+        {
+            _teleportTimer -= dt;
+            if (_teleportTimer <= 0f)
+            {
+                _teleportTimer = GameSettings.TeleportCooldown;
+                int skip = Math.Min(GameSettings.TeleportWaypoints, _path.Count - _currentWaypoint);
+                if (skip > 0)
+                {
+                    _currentWaypoint += skip;
+                    if (_currentWaypoint < _path.Count)
+                        Position = _path[_currentWaypoint];
+                }
+            }
+        }
+
+        // movement
         if (_currentWaypoint >= _path.Count)
         {
             ReachedEnd = true;
@@ -154,7 +189,7 @@ public class Enemy
     {
         if (!IsAlive) return;
 
-        const int size = 24;
+        int size = IsChild ? 18 : 24;
 
         Color tint = Color.White;
         if (IsBurning)
@@ -168,13 +203,16 @@ public class Enemy
             new Rectangle((int)(Position.X - size / 2f), (int)(Position.Y - size / 2f), size, size),
             tint);
 
+        // health bar
         float hp = Health / MaxHealth;
-        const int barW = 28, barH = 4;
+        int barW = IsChild ? 20 : 28;
+        const int barH = 4;
         int bx = (int)(Position.X - barW / 2f);
         int by = (int)(Position.Y - size / 2f - 8);
         sb.Draw(pixel, new Rectangle(bx, by, barW, barH), new Color(60, 0, 0));
         sb.Draw(pixel, new Rectangle(bx, by, (int)(barW * hp), barH), Color.Lime);
 
+        // debuff indicators
         int indicatorY = by + barH + 1;
         if (IsBurning)
         {
@@ -188,5 +226,22 @@ public class Enemy
         }
         if (IsVulnerable)
             sb.Draw(pixel, new Rectangle(bx, indicatorY, (int)(barW * (_vulnTimer / GameSettings.TeslaVulnerabilityDuration)), 2), Color.Cyan);
+
+        // ability icon indicators
+        if (Type == EnemyType.Medic)
+        {
+            // small green + above head
+            int cx = (int)Position.X, cy = by - 6;
+            sb.Draw(pixel, new Rectangle(cx - 3, cy, 6, 2), new Color(60, 240, 200));
+            sb.Draw(pixel, new Rectangle(cx - 1, cy - 2, 2, 6), new Color(60, 240, 200));
+        }
+        else if (Type == EnemyType.Hacker)
+        {
+            // small purple diamond
+            int cx = (int)Position.X, cy = by - 4;
+            sb.Draw(pixel, new Rectangle(cx - 1, cy - 2, 2, 2), new Color(180, 60, 240));
+            sb.Draw(pixel, new Rectangle(cx - 2, cy, 4, 1), new Color(180, 60, 240));
+            sb.Draw(pixel, new Rectangle(cx - 1, cy + 1, 2, 2), new Color(180, 60, 240));
+        }
     }
 }

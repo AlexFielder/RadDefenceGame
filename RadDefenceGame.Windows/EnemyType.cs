@@ -7,5 +7,13 @@ public enum EnemyType
     Speeder,
     Tank,
     Shielded,
-    Boss
+    Boss,
+    Centipede,
+    Blaster,
+    Swarm,
+    Teleporter,
+    Kamikaze,
+    Medic,
+    Spreader,
+    Hacker
 }
