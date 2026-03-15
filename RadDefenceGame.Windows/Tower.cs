@@ -41,15 +41,20 @@ public class Tower
     private bool _hasTarget;
     private const float AimSpeed = 8f;
 
-    /// <summary>The direction the sprite faces at rest (radians from +X axis).
-    /// 0 = points right, -PI/2 = points up. Used to calculate correct rotation.</summary>
+    // The direction each sprite's barrel faces at rest (radians from +X axis).
+    // Adjust per sprite if rotation looks wrong.
+    //   0              = right  ->
+    //  -PI/4           = upper-right  />
+    //  -PI/2           = up     ^
+    //  -PI*3/4         = upper-left  <\
+    //   PI or -PI      = left   <-
+    //   PI/4           = lower-right  \>
+    //   PI/2           = down   v
     private static float GetSpriteRestAngle(TowerType t) => t switch
     {
-        // sprites whose barrel/nozzle points RIGHT at rest
-        TowerType.Sniper => 0f,
-        TowerType.Flame  => 0f,
-        // all others point UP at rest
-        _ => -MathF.PI / 2f
+        TowerType.Sniper => -MathF.PI * 3 / 4,   // barrel points upper-right
+        TowerType.Flame  => -MathF.PI,                // nozzle points right
+        _ => -MathF.PI / 2f                    // default: points up
     };
 
     // -- pulse animation for field towers --
@@ -188,8 +193,8 @@ public class Tower
         if (targetPos.HasValue)
         {
             var dir = targetPos.Value - WorldPos;
-            // atan2 gives angle from +X axis to the target direction
-            // subtract the sprite's rest angle so rotation=0 means "facing default direction"
+            // atan2 gives the angle to the target from +X axis
+            // subtract rest angle so rotation=0 means sprite faces its default direction
             _targetAngle = MathF.Atan2(dir.Y, dir.X) - GetSpriteRestAngle(Type);
             _hasTarget = true;
         }
