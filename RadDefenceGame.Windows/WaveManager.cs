@@ -26,23 +26,18 @@ public class WaveManager
 
     private const float AutoStartDelay = 10f;
 
-    public WaveManager(Map map)
-    {
-        _map = map;
-    }
+    public WaveManager(Map map) => _map = map;
 
     public void SetSprites(SpriteSet sprites) => _sprites = sprites;
 
     public void RequestStart()
     {
-        if (!WaveActive)
-            StartNextWave();
+        if (!WaveActive) StartNextWave();
     }
 
     private void StartNextWave()
     {
         OnWaveStarting?.Invoke();
-
         CurrentWave++;
         _enemiesToSpawn = 5 + CurrentWave * 2;
         _spawnInterval = MathF.Max(0.3f, 1.2f - CurrentWave * 0.05f);
@@ -56,20 +51,12 @@ public class WaveManager
         LastWallGrant = 0;
     }
 
-    private int RollWallGrant()
-    {
-        return _rng.Next(GameSettings.WallGrantMin, GameSettings.WallGrantMax + 1);
-    }
-
     public void Update(GameTime gameTime, List<Enemy> enemies, GameState state)
     {
         if (WaitingForPlayer && CurrentWave > 0)
         {
             BreakTimer += (float)gameTime.ElapsedGameTime.TotalSeconds;
-
-            if (state.AutoStartWaves && BreakTimer >= AutoStartDelay)
-                StartNextWave();
-
+            if (state.AutoStartWaves && BreakTimer >= AutoStartDelay) StartNextWave();
             return;
         }
 
@@ -81,29 +68,27 @@ public class WaveManager
             if (_spawnTimer <= 0 && _enemiesToSpawn > 0)
             {
                 int reward = GameSettings.KillBaseReward + CurrentWave;
-                var sprite = _sprites?.GetEnemySprite(CurrentWave) ?? _sprites?.EnemyScout;
-                enemies.Add(new Enemy(_map.CurrentPath, _enemyHealth, _enemySpeed, reward, sprite!));
+                var (sprite, enemyType) = _sprites?.GetEnemyInfo(CurrentWave)
+                    ?? (_sprites!.EnemyScout, EnemyType.Scout);
+                enemies.Add(new Enemy(_map.CurrentPath, _enemyHealth, _enemySpeed,
+                    reward, sprite, enemyType));
                 _enemiesToSpawn--;
                 _spawnTimer = _spawnInterval;
-
-                if (_enemiesToSpawn <= 0)
-                    IsSpawning = false;
+                if (_enemiesToSpawn <= 0) IsSpawning = false;
             }
         }
 
         if (!IsSpawning)
         {
             bool anyAlive = false;
-            foreach (var e in enemies)
-                if (e.IsAlive) { anyAlive = true; break; }
+            foreach (var e in enemies) if (e.IsAlive) { anyAlive = true; break; }
 
             if (!anyAlive)
             {
                 WaveActive = false;
                 WaitingForPlayer = true;
                 BreakTimer = 0;
-
-                LastWallGrant = RollWallGrant();
+                LastWallGrant = _rng.Next(GameSettings.WallGrantMin, GameSettings.WallGrantMax + 1);
                 state.GrantWalls(LastWallGrant);
             }
         }

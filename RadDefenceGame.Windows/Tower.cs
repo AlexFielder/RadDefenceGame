@@ -21,19 +21,23 @@ public class Tower
     public float BurnDuration { get; private set; }
     public float SplashRadius { get; private set; }
 
-    // Tesla: vulnerability debuff
     public float VulnBonus { get; private set; }
     public float VulnDuration { get; private set; }
 
-    // Tachyon: slow debuff
     public float SlowFactor { get; private set; }
     public float SlowDuration { get; private set; }
 
-    // Grinder: bonus credit range (passive, no firing)
     public float GrinderBonusRatio { get; private set; }
 
     public int TotalInvested { get; private set; }
     public bool PlacedDuringPrep { get; set; } = true;
+
+    public bool IsFieldTower => Type == TowerType.Tesla || Type == TowerType.Tachyon;
+
+    private float _pulseTimer;
+    private const float PulseDuration = 0.4f;
+
+    private float _flameSoundCooldown;
 
     private float _cooldown;
 
@@ -114,21 +118,18 @@ public class Tower
             0, 0, 0, 0, 0, 0, 0, 0),
         TowerType.Rocket  => new(280f, 60f,  0.3f, new Color(200, 50, 30),
             0, 0, GameSettings.RocketSplashRadius, 0, 0, 0, 0, 0),
-        TowerType.Flame   => new(80f,  8f,   3.0f, new Color(255, 140, 0),
+        TowerType.Flame   => new(80f,  3f,   8.0f, new Color(255, 140, 0),
             GameSettings.BurnDamagePerSecond, GameSettings.BurnDuration, 0, 0, 0, 0, 0, 0),
-        TowerType.Tesla   => new(110f, 15f,  1.2f, new Color(100, 220, 255),
+        TowerType.Tesla   => new(110f, 15f,  0.8f, new Color(100, 220, 255),
             0, 0, 0, GameSettings.TeslaVulnerabilityBonus, GameSettings.TeslaVulnerabilityDuration, 0, 0, 0),
-        TowerType.Tachyon => new(100f, 5f,   0.8f, new Color(220, 200, 50),
+        TowerType.Tachyon => new(100f, 5f,   0.6f, new Color(220, 200, 50),
             0, 0, 0, 0, 0, GameSettings.TachyonSlowFactor, GameSettings.TachyonSlowDuration, 0),
         TowerType.Grinder => new(GameSettings.GrinderRange, 0f, 0f, new Color(200, 80, 80),
             0, 0, 0, 0, 0, 0, 0, GameSettings.GrinderBonusCreditRatio),
         _ => new(100f, 20f, 1f, Color.White, 0, 0, 0, 0, 0, 0, 0, 0)
     };
 
-    // -- upgrades --
-
     public bool CanUpgrade => Level < GameSettings.MaxTowerLevel && Type != TowerType.Grinder;
-
     public int UpgradeCost => (int)(GetCost(Type) * GameSettings.UpgradeCostMultiplier);
 
     public void Upgrade()
@@ -139,102 +140,138 @@ public class Tower
         Range *= GameSettings.UpgradeRangeMultiplier;
         FireRate *= GameSettings.UpgradeFireRateMultiplier;
 
-        if (Type == TowerType.Flame)
-        {
-            BurnDps *= GameSettings.UpgradeDamageMultiplier;
-            BurnDuration += 0.5f;
-        }
-
-        if (Type == TowerType.Rocket)
-            SplashRadius *= 1.15f;
-
-        if (Type == TowerType.Tesla)
-        {
-            VulnBonus += 0.1f;  // +10% more vulnerability per level
-            VulnDuration += 0.5f;
-        }
-
-        if (Type == TowerType.Tachyon)
-        {
-            SlowFactor *= 0.8f;  // slower (e.g. 0.5 -> 0.4 -> 0.32)
-            SlowDuration += 0.5f;
-        }
+        if (Type == TowerType.Flame) { BurnDps *= GameSettings.UpgradeDamageMultiplier; BurnDuration += 0.5f; }
+        if (Type == TowerType.Rocket) SplashRadius *= 1.15f;
+        if (Type == TowerType.Tesla) { VulnBonus += 0.1f; VulnDuration += 0.5f; }
+        if (Type == TowerType.Tachyon) { SlowFactor *= 0.8f; SlowDuration += 0.5f; }
 
         TotalInvested += UpgradeCost;
     }
 
-    // -- sell value --
-
     public int FullRefundValue => TotalInvested;
     public int SellValue => (int)(TotalInvested * GameSettings.SellRefundRatio);
 
-    // -- game logic --
-
-    public void Update(GameTime gameTime, List<Enemy> enemies, List<Projectile> projectiles)
+    public void Update(GameTime gameTime, List<Enemy> enemies,
+        List<Projectile> projectiles, List<FlameParticle> flames)
     {
-        // Grinder is passive - no firing
+        float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
+
+        if (_pulseTimer > 0f) _pulseTimer -= dt;
+        if (_flameSoundCooldown > 0f) _flameSoundCooldown -= dt;
+
         if (Type == TowerType.Grinder) return;
 
-        _cooldown -= (float)gameTime.ElapsedGameTime.TotalSeconds;
+        _cooldown -= dt;
         if (_cooldown > 0) return;
 
-        Enemy? best = null;
-        float bestDist = float.MaxValue;
-
-        foreach (var e in enemies)
+        if (IsFieldTower)
         {
-            if (!e.IsAlive) continue;
-            float d = Vector2.Distance(WorldPos, e.Position);
-            if (d <= Range && d < bestDist)
+            bool hitAny = false;
+            foreach (var e in enemies)
             {
-                bestDist = d;
-                best = e;
+                if (!e.IsAlive) continue;
+                if (Vector2.Distance(WorldPos, e.Position) > Range) continue;
+                hitAny = true;
+                if (Damage > 0) e.TakeDamage(Damage, Type);
+                if (Type == TowerType.Tesla) e.ApplyVulnerability(VulnBonus, VulnDuration);
+                else if (Type == TowerType.Tachyon) e.ApplySlow(SlowFactor, SlowDuration);
+            }
+
+            if (hitAny)
+            {
+                _cooldown = 1f / FireRate;
+                _pulseTimer = PulseDuration;
+                if (FireSounds.TryGetValue(Type, out var s))
+                    AudioManager.Instance.PlayVaried(s, 0.5f, 0.08f);
             }
         }
-
-        if (best != null)
+        else if (Type == TowerType.Flame)
         {
-            var proj = new Projectile(WorldPos, best, Damage, Type,
-                BurnDps, BurnDuration, SplashRadius,
-                VulnBonus, VulnDuration,
-                SlowFactor, SlowDuration);
+            Enemy? best = null;
+            float bestDist = float.MaxValue;
+            foreach (var e in enemies)
+            {
+                if (!e.IsAlive) continue;
+                float d = Vector2.Distance(WorldPos, e.Position);
+                if (d <= Range && d < bestDist) { bestDist = d; best = e; }
+            }
 
-            if (Type == TowerType.Rocket)
-                proj.SetEnemyList(enemies);
+            if (best != null)
+            {
+                var dir = best.Position - WorldPos;
+                if (dir.LengthSquared() > 0) dir.Normalize();
 
-            projectiles.Add(proj);
-            _cooldown = 1f / FireRate;
+                int count = 2 + (Level > 2 ? 1 : 0);
+                float particleSpeed = 140f + Level * 20f;
+                float particleLife = Range / particleSpeed * 1.2f;
 
-            if (FireSounds.TryGetValue(Type, out var soundName))
-                AudioManager.Instance.PlayVaried(soundName, 0.5f, 0.08f);
+                for (int i = 0; i < count; i++)
+                    flames.Add(new FlameParticle(WorldPos, dir, particleSpeed, particleLife,
+                        Damage, BurnDps, BurnDuration));
+
+                _cooldown = 1f / FireRate;
+
+                if (_flameSoundCooldown <= 0f)
+                {
+                    AudioManager.Instance.PlayVaried("tower_flame", 0.4f, 0.1f, 0.15f);
+                    _flameSoundCooldown = 0.2f;
+                }
+            }
+        }
+        else
+        {
+            Enemy? best = null;
+            float bestDist = float.MaxValue;
+            foreach (var e in enemies)
+            {
+                if (!e.IsAlive) continue;
+                float d = Vector2.Distance(WorldPos, e.Position);
+                if (d <= Range && d < bestDist) { bestDist = d; best = e; }
+            }
+
+            if (best != null)
+            {
+                var proj = new Projectile(WorldPos, best, Damage, Type, BurnDps, BurnDuration, SplashRadius);
+                if (Type == TowerType.Rocket) proj.SetEnemyList(enemies);
+                projectiles.Add(proj);
+                _cooldown = 1f / FireRate;
+                if (FireSounds.TryGetValue(Type, out var s))
+                    AudioManager.Instance.PlayVaried(s, 0.5f, 0.08f);
+            }
         }
     }
-
-    // -- drawing --
 
     public void Draw(SpriteBatch sb, SpriteSet sprites, bool selected)
     {
         int pad = 4;
         int size = GameSettings.CellSize - pad;
-        var rect = new Rectangle(
-            (int)(WorldPos.X - size / 2f),
-            (int)(WorldPos.Y - size / 2f),
-            size, size);
+        var rect = new Rectangle((int)(WorldPos.X - size / 2f), (int)(WorldPos.Y - size / 2f), size, size);
 
-        var tex = sprites.Towers[Type];
-        sb.Draw(tex, rect, Color.White);
+        sb.Draw(sprites.Towers[Type], rect, Color.White);
 
         if (Level > 1)
-        {
             for (int i = 0; i < Level - 1; i++)
+                sb.Draw(sprites.Pixel, new Rectangle(rect.X + 3 + i * 7, rect.Bottom - 7, 5, 5), Color.Gold);
+
+        if (IsFieldTower)
+        {
+            Color auraCol = Type == TowerType.Tesla ? new Color(100, 220, 255) : new Color(220, 200, 50);
+            int d = (int)(Range * 2);
+            sb.Draw(sprites.Ring,
+                new Rectangle((int)(WorldPos.X - Range), (int)(WorldPos.Y - Range), d, d),
+                auraCol * 0.08f);
+
+            if (_pulseTimer > 0f)
             {
-                int sx = rect.X + 3 + i * 7;
-                int sy = rect.Bottom - 7;
-                sb.Draw(sprites.Pixel, new Rectangle(sx, sy, 5, 5), Color.Gold);
+                float progress = 1f - (_pulseTimer / PulseDuration);
+                float pr = Range * progress;
+                int pd = (int)(pr * 2);
+                sb.Draw(sprites.Ring,
+                    new Rectangle((int)(WorldPos.X - pr), (int)(WorldPos.Y - pr), pd, pd),
+                    auraCol * (0.35f * (1f - progress)));
             }
         }
 
-        // Grinder shows its aura range subtly
         if (Type == TowerType.Grinder)
         {
             int d = (int)(Range * 2);
@@ -247,15 +284,14 @@ public class Tower
     public void DrawRange(SpriteBatch sb, Texture2D ring)
     {
         int d = (int)(Range * 2);
-        Color rangeColor = Type switch
+        Color rc = Type switch
         {
             TowerType.Tesla => new Color(100, 220, 255),
             TowerType.Tachyon => new Color(220, 200, 50),
             TowerType.Grinder => new Color(200, 80, 80),
+            TowerType.Flame => new Color(255, 140, 0),
             _ => Color.White
         };
-        sb.Draw(ring,
-            new Rectangle((int)(WorldPos.X - Range), (int)(WorldPos.Y - Range), d, d),
-            rangeColor * 0.15f);
+        sb.Draw(ring, new Rectangle((int)(WorldPos.X - Range), (int)(WorldPos.Y - Range), d, d), rc * 0.15f);
     }
 }

@@ -15,14 +15,18 @@ public class Enemy
     public bool ReachedEnd { get; set; }
     public int Reward { get; }
     public Texture2D Sprite { get; }
+    public EnemyType Type { get; }
 
-    // -- effective speed (after debuffs) --
+    /// <summary>The tower type that last dealt damage. Used for kill attribution.</summary>
+    public TowerType? LastDamageSource { get; private set; }
+
     public float Speed => BaseSpeed * SlowMultiplier;
 
     // -- burn DOT --
     public bool IsBurning => _burnTimer > 0f;
     private float _burnTimer;
     private float _burnDps;
+    private TowerType _burnSource;
 
     // -- slow (Tachyon Warp) --
     public bool IsSlowed => _slowTimer > 0f;
@@ -39,7 +43,8 @@ public class Enemy
     private int _currentWaypoint = 1;
     private List<Vector2> _path;
 
-    public Enemy(List<Vector2> path, float health, float speed, int reward, Texture2D sprite)
+    public Enemy(List<Vector2> path, float health, float speed, int reward,
+        Texture2D sprite, EnemyType type)
     {
         _path = new List<Vector2>(path);
         Position = _path.Count > 0 ? _path[0] : Vector2.Zero;
@@ -48,6 +53,7 @@ public class Enemy
         BaseSpeed = speed;
         Reward = reward;
         Sprite = sprite;
+        Type = type;
     }
 
     public void UpdatePath(List<Vector2> newPath)
@@ -59,51 +65,39 @@ public class Enemy
         for (int i = 0; i < newPath.Count; i++)
         {
             float d = Vector2.DistanceSquared(Position, newPath[i]);
-            if (d < bestDist)
-            {
-                bestDist = d;
-                bestIdx = i;
-            }
+            if (d < bestDist) { bestDist = d; bestIdx = i; }
         }
 
         _path = new List<Vector2>(newPath);
         _currentWaypoint = Math.Min(bestIdx + 1, _path.Count);
     }
 
-    /// <summary>Apply damage, amplified by vulnerability if active.</summary>
-    public void TakeDamage(float damage)
+    public void TakeDamage(float damage, TowerType source)
     {
         float actual = damage * VulnerabilityMultiplier;
         Health -= actual;
-        if (Health <= 0f)
-        {
-            Health = 0f;
-            IsAlive = false;
-        }
+        LastDamageSource = source;
+        if (Health <= 0f) { Health = 0f; IsAlive = false; }
     }
 
-    /// <summary>Apply raw damage (no vulnerability multiplier) - used for burn ticks.</summary>
-    public void TakeRawDamage(float damage)
+    /// <summary>Raw damage (no vulnerability) with source tracking.</summary>
+    public void TakeRawDamage(float damage, TowerType source)
     {
         Health -= damage;
-        if (Health <= 0f)
-        {
-            Health = 0f;
-            IsAlive = false;
-        }
+        LastDamageSource = source;
+        if (Health <= 0f) { Health = 0f; IsAlive = false; }
     }
 
-    public void ApplyBurn(float dps, float duration)
+    public void ApplyBurn(float dps, float duration, TowerType source)
     {
         _burnDps = MathF.Max(_burnDps, dps);
         _burnTimer = MathF.Max(_burnTimer, duration);
+        _burnSource = source;
     }
 
     public void ApplySlow(float factor, float duration)
     {
-        // take the stronger slow, refresh duration
-        if (factor < _slowFactor || !IsSlowed)
-            _slowFactor = factor;
+        if (factor < _slowFactor || !IsSlowed) _slowFactor = factor;
         _slowTimer = MathF.Max(_slowTimer, duration);
     }
 
@@ -119,11 +113,10 @@ public class Enemy
 
         float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
 
-        // tick debuffs
         if (_burnTimer > 0f)
         {
             _burnTimer -= dt;
-            TakeRawDamage(_burnDps * dt);
+            TakeRawDamage(_burnDps * dt, _burnSource);
             if (!IsAlive) return;
             if (_burnTimer <= 0f) { _burnTimer = 0f; _burnDps = 0f; }
         }
@@ -140,7 +133,6 @@ public class Enemy
             if (_vulnTimer <= 0f) { _vulnTimer = 0f; _vulnBonus = 0f; }
         }
 
-        // movement
         if (_currentWaypoint >= _path.Count)
         {
             ReachedEnd = true;
@@ -152,15 +144,10 @@ public class Enemy
         var diff = target - Position;
         float dist = diff.Length();
 
-        if (dist < 2f)
-        {
-            _currentWaypoint++;
-            return;
-        }
+        if (dist < 2f) { _currentWaypoint++; return; }
 
         diff.Normalize();
-        float step = Speed * dt;
-        Position += diff * MathF.Min(step, dist);
+        Position += diff * MathF.Min(Speed * dt, dist);
     }
 
     public void Draw(SpriteBatch sb, Texture2D pixel)
@@ -169,7 +156,6 @@ public class Enemy
 
         const int size = 24;
 
-        // tint based on active debuffs
         Color tint = Color.White;
         if (IsBurning)
             tint = Color.Lerp(Color.OrangeRed, Color.Yellow, (_burnTimer * 3f) % 1f);
@@ -182,7 +168,6 @@ public class Enemy
             new Rectangle((int)(Position.X - size / 2f), (int)(Position.Y - size / 2f), size, size),
             tint);
 
-        // health bar
         float hp = Health / MaxHealth;
         const int barW = 28, barH = 4;
         int bx = (int)(Position.X - barW / 2f);
@@ -190,24 +175,18 @@ public class Enemy
         sb.Draw(pixel, new Rectangle(bx, by, barW, barH), new Color(60, 0, 0));
         sb.Draw(pixel, new Rectangle(bx, by, (int)(barW * hp), barH), Color.Lime);
 
-        // debuff indicators under health bar
         int indicatorY = by + barH + 1;
         if (IsBurning)
         {
-            float pct = _burnTimer / GameSettings.BurnDuration;
-            sb.Draw(pixel, new Rectangle(bx, indicatorY, (int)(barW * pct), 2), Color.Orange);
+            sb.Draw(pixel, new Rectangle(bx, indicatorY, (int)(barW * (_burnTimer / GameSettings.BurnDuration)), 2), Color.Orange);
             indicatorY += 3;
         }
         if (IsSlowed)
         {
-            float pct = _slowTimer / GameSettings.TachyonSlowDuration;
-            sb.Draw(pixel, new Rectangle(bx, indicatorY, (int)(barW * pct), 2), Color.MediumPurple);
+            sb.Draw(pixel, new Rectangle(bx, indicatorY, (int)(barW * (_slowTimer / GameSettings.TachyonSlowDuration)), 2), Color.MediumPurple);
             indicatorY += 3;
         }
         if (IsVulnerable)
-        {
-            float pct = _vulnTimer / GameSettings.TeslaVulnerabilityDuration;
-            sb.Draw(pixel, new Rectangle(bx, indicatorY, (int)(barW * pct), 2), Color.Cyan);
-        }
+            sb.Draw(pixel, new Rectangle(bx, indicatorY, (int)(barW * (_vulnTimer / GameSettings.TeslaVulnerabilityDuration)), 2), Color.Cyan);
     }
 }
