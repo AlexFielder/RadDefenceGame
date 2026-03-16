@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <RollForward>LatestMajor</RollForward>
     <PublishReadyToRun>false</PublishReadyToRun>
     <TieredCompilation>false</TieredCompilation>
@@ -17,28 +17,58 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="AnimatedSprite.cs" />
-    <Compile Include="Game1.cs" />
-    <Compile Include="Particle.cs" />
-    <Compile Include="ParticleEngine.cs" />
     <Compile Include="Program.cs" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Update="Content\**\*.*">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
+    <Compile Include="Game1.cs" />
+    <Compile Include="GameSettings.cs" />
+    <Compile Include="GameState.cs" />
+    <Compile Include="GameStats.cs" />
+    <Compile Include="CellType.cs" />
+    <Compile Include="EnemyType.cs" />
+    <Compile Include="EnemyGlossary.cs" />
+    <Compile Include="Map.cs" />
+    <Compile Include="Enemy.cs" />
+    <Compile Include="Tower.cs" />
+    <Compile Include="TowerType.cs" />
+    <Compile Include="Projectile.cs" />
+    <Compile Include="FlameParticle.cs" />
+    <Compile Include="RepairDrone.cs" />
+    <Compile Include="WaveManager.cs" />
+    <Compile Include="PlacementMode.cs" />
+    <Compile Include="ToolbarButton.cs" />
+    <Compile Include="ContextMenu.cs" />
+    <Compile Include="SeedManager.cs" />
+    <Compile Include="SpriteSet.cs" />
+    <Compile Include="AudioManager.cs" />
+    <Compile Include="SaveManager.cs" />
   </ItemGroup>
 
   <ItemGroup>
     <Content Include="Icon.ico" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="Content\Audio\**\*.wav">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>Content\Audio\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </None>
+  </ItemGroup>
+
   <PropertyGroup>
     <AssemblyTitle>RadDefenceGame.Windows</AssemblyTitle>
     <Product>RadDefenceGame.Windows</Product>
-    <Copyright>Copyright © 2019-2023</Copyright>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>1.0.0.0</FileVersion>
+    <Copyright>Copyright © 2026</Copyright>
+    <AssemblyVersion>1.1.0.0</AssemblyVersion>
+    <FileVersion>1.1.0.0</FileVersion>
   </PropertyGroup>
+
+  <Target Name="BuildContent" BeforeTargets="BeforeBuild">
+    <Exec Command="mgcb /@:Content.mgcb" WorkingDirectory="$(ProjectDir)Content" />
+  </Target>
+
+  <Target Name="CopyContent" AfterTargets="Build">
+    <ItemGroup>
+      <ContentFiles Include="$(ProjectDir)Content\bin\DesktopGL\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ContentFiles)" DestinationFiles="@(ContentFiles->'$(OutputPath)Content\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

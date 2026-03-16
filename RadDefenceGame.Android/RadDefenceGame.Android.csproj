@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Library</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
@@ -27,7 +27,7 @@
   <PropertyGroup>
     <AssemblyTitle>RadDefenceGame.Android</AssemblyTitle>
     <Product>RadDefenceGame.Android</Product>
-    <Copyright>Copyright © 2019-2023</Copyright>
+    <Copyright>Copyright © 2026</Copyright>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <FileVersion>1.0.0.0</FileVersion>
   </PropertyGroup>

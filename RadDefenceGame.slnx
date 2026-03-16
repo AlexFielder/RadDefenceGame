@@ -1,0 +1,13 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/Solution Items/">
+    <File Path="sprite-generation-prompt.md" />
+  </Folder>
+  <Project Path="RadDefenceGame.Android/RadDefenceGame.Android.csproj">
+    <Deploy />
+  </Project>
+  <Project Path="RadDefenceGame.Windows/RadDefenceGame.Windows.csproj" />
+</Solution>
