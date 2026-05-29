@@ -12,6 +12,11 @@ public class Tower
     public TowerType Type { get; }
     public int Level { get; private set; } = 1;
 
+    /// <summary>True when the tower was placed via Zone mode (free pixel position
+    /// over a wall cell) rather than snapped to a block centre. Affects save
+    /// serialization and grid-cell ownership semantics.</summary>
+    public bool IsZonePlaced { get; }
+
     public float Range { get; private set; }
     public float Damage { get; private set; }
     public float FireRate { get; private set; }
@@ -74,6 +79,24 @@ public class Tower
                 row * GameSettings.CellSize + GameSettings.CellSize + GameSettings.UIHeight);
         else WorldPos = Map.GridToWorld(col, row);
         Type = type;
+        IsZonePlaced = false;
+        var s = GetBaseStats(type);
+        Range = s.range; Damage = s.damage; FireRate = s.fireRate; Color = s.color;
+        BurnDps = s.burnDps; BurnDuration = s.burnDuration; SplashRadius = s.splashRadius;
+        VulnBonus = s.vulnBonus; VulnDuration = s.vulnDuration;
+        SlowFactor = s.slowFactor; SlowDuration = s.slowDuration; GrinderBonusRatio = s.grinderBonus;
+        TotalInvested = GetCost(type);
+    }
+
+    /// <summary>Zone-mode constructor: uses an explicit world position (must still be
+    /// anchored to a wall cell via <paramref name="col"/>/<paramref name="row"/> for
+    /// save/load, but WorldPos is free within that cell). Not valid for Repair (2x2).</summary>
+    public Tower(int col, int row, TowerType type, Vector2 worldPos)
+    {
+        GridPos = new Point(col, row);
+        WorldPos = worldPos;
+        Type = type;
+        IsZonePlaced = true;
         var s = GetBaseStats(type);
         Range = s.range; Damage = s.damage; FireRate = s.fireRate; Color = s.color;
         BurnDps = s.burnDps; BurnDuration = s.burnDuration; SplashRadius = s.splashRadius;

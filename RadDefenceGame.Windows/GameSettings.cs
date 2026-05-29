@@ -21,11 +21,14 @@ public static class GameSettings
     public const int KillBaseReward = 10;
 
     // Difficulty multipliers
-    public static int GetStartingLives(Difficulty d) => d switch { Difficulty.Easy => 30, Difficulty.Hard => 10, _ => StartingLives };
-    public static int GetStartingMoney(Difficulty d) => d switch { Difficulty.Easy => 200, Difficulty.Hard => 75, _ => StartingMoney };
-    public static float GetEnemyHealthMultiplier(Difficulty d) => d switch { Difficulty.Easy => 0.7f, Difficulty.Hard => 1.4f, _ => 1f };
-    public static float GetEnemySpeedMultiplier(Difficulty d) => d switch { Difficulty.Easy => 0.9f, Difficulty.Hard => 1.1f, _ => 1f };
-    public static float GetRewardMultiplier(Difficulty d) => d switch { Difficulty.Easy => 1.3f, Difficulty.Hard => 0.75f, _ => 1f };
+    // Hard mode tuning (playtester feedback: "fine tune the harder mode so it's actually playable"):
+    // Softened from 10 lives / $75 / 1.4x HP / 1.1x speed / 0.75x rewards so Hard is punishing
+    // but still beatable. Rewards bump in particular stops the early economy from stalling out.
+    public static int GetStartingLives(Difficulty d) => d switch { Difficulty.Easy => 30, Difficulty.Hard => 12, _ => StartingLives };
+    public static int GetStartingMoney(Difficulty d) => d switch { Difficulty.Easy => 200, Difficulty.Hard => 85, _ => StartingMoney };
+    public static float GetEnemyHealthMultiplier(Difficulty d) => d switch { Difficulty.Easy => 0.7f, Difficulty.Hard => 1.25f, _ => 1f };
+    public static float GetEnemySpeedMultiplier(Difficulty d) => d switch { Difficulty.Easy => 0.9f, Difficulty.Hard => 1.05f, _ => 1f };
+    public static float GetRewardMultiplier(Difficulty d) => d switch { Difficulty.Easy => 1.3f, Difficulty.Hard => 0.85f, _ => 1f };
 
     // Tower costs
     public const int BasicTowerCost = 50;
@@ -85,8 +88,14 @@ public static class GameSettings
     public const int InitialWallCount = 60;
 
     // Speed system
-    public static readonly float[] SpeedSteps = { 0.25f, 0.5f, 1f, 2f, 3f, 5f, 10f };
+    public static readonly float[] SpeedSteps = { 0.25f, 0.5f, 1f, 2f, 3f, 5f, 10f, 15f, 20f };
     public const int DefaultSpeedIndex = 2;
+    // Above this multiplier we substep the simulation so projectiles don't skip
+    // past enemies and waypoint distances stay sane.
+    public const float SubstepSpeedThreshold = 10f;
+
+    // Zone placement (free placement anywhere on wall cells instead of snapped to block centres)
+    public const float ZoneMinTowerSpacing = 30f;
 
     // --- Enemy ability settings ---
     public const float TeleportCooldown = 4f;

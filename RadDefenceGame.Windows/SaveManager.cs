@@ -19,14 +19,18 @@ public static class SaveManager
         Converters = { new JsonStringEnumConverter() }
     };
 
+    // Zone fields default to 0/false so older saves deserialize cleanly as block-mode towers.
     public record TowerRecord(
         int Type, int Col, int Row, int Level, int TotalInvested,
-        float TowerHealth, bool AutoRebuildEnabled);
+        float TowerHealth, bool AutoRebuildEnabled,
+        bool IsZonePlaced = false, float WorldPosX = 0f, float WorldPosY = 0f);
 
+    // PlacementSystem defaults to 0 (Block) so older saves load correctly.
     public record SaveData(
         int Seed, int Wave, int Lives, int Money, int Walls, int Score,
         int Difficulty, bool AutoStartWaves, float PlayTimeSeconds,
-        List<TowerRecord> Towers, List<int[]> PlayerWalls);
+        List<TowerRecord> Towers, List<int[]> PlayerWalls,
+        int PlacementSystem = 0);
 
     public static bool HasSave() => File.Exists(SaveFile);
 
@@ -37,7 +41,8 @@ public static class SaveManager
         foreach (var t in towers)
             towerRecords.Add(new TowerRecord(
                 (int)t.Type, t.GridPos.X, t.GridPos.Y, t.Level,
-                t.TotalInvested, t.TowerHealth, t.AutoRebuildEnabled));
+                t.TotalInvested, t.TowerHealth, t.AutoRebuildEnabled,
+                t.IsZonePlaced, t.WorldPos.X, t.WorldPos.Y));
 
         var playerWalls = new List<int[]>();
         foreach (var pt in map.PlayerPlacedWalls)
@@ -45,7 +50,7 @@ public static class SaveManager
 
         var data = new SaveData(seed, wave, state.Lives, state.Money, state.Walls,
             state.Score, (int)state.Difficulty, state.AutoStartWaves, playTime,
-            towerRecords, playerWalls);
+            towerRecords, playerWalls, (int)state.PlacementSystem);
 
         Directory.CreateDirectory(SaveDir);
         File.WriteAllText(SaveFile, JsonSerializer.Serialize(data, JsonOpts));

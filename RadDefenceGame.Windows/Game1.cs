@@ -27,7 +27,8 @@ public class Game1 : Game
     private readonly List<Enemy> _pendingSpawns = new();
     private readonly List<RepairDrone> _drones = new();
 
-    private record DestroyedTowerRecord(TowerType Type, Point GridPos, int Level, int TotalInvested);
+    private record DestroyedTowerRecord(TowerType Type, Point GridPos, int Level, int TotalInvested,
+        bool IsZonePlaced, Vector2 WorldPos);
     private readonly List<DestroyedTowerRecord> _destroyedThisWave = new();
 
     private GameStats _runStats = null!;
@@ -37,6 +38,7 @@ public class Game1 : Game
     private MouseState _prevMouse;
     private KeyboardState _prevKb;
     private Point _hoverCell;
+    private Vector2 _mouseWorld;
     private Tower? _hoveredTower;
 
     private readonly List<ToolbarButton> _toolbar = new();
@@ -46,6 +48,9 @@ public class Game1 : Game
     private readonly ContextMenu _contextMenu = new();
 
     private bool _autoStartPref = false;
+    // Zone-placement preference is sticky across runs once toggled, like _autoStartPref.
+    private PlacementSystem _placementSystemPref = PlacementSystem.Block;
+    private ToolbarButton? _zoneButton;
     private Difficulty _selectedDifficulty = Difficulty.Normal;
     private GameScreen _screen = GameScreen.Title;
     private GameScreen _settingsReturnScreen;
@@ -93,6 +98,7 @@ public class Game1 : Game
     {
         _seeds.SetSeed(seed); _map = new Map(seed); _state = new GameState();
         _state.ApplyDifficulty(difficulty); _state.AutoStartWaves = _autoStartPref;
+        _state.PlacementSystem = _placementSystemPref;
         _waves = new WaveManager(_map); _waves.SetSprites(_sprites);
         _waves.OnWaveStarting += OnWaveStarting; _waves.OnWaveCompleted += OnWaveCompleted;
         _enemies.Clear(); _towers.Clear(); _projectiles.Clear(); _flames.Clear();
@@ -110,6 +116,8 @@ public class Game1 : Game
         _state.Lives = save.Lives; _state.Money = save.Money;
         _state.Walls = save.Walls; _state.Score = save.Score;
         _state.AutoStartWaves = save.AutoStartWaves;
+        _state.PlacementSystem = (PlacementSystem)save.PlacementSystem;
+        _placementSystemPref = _state.PlacementSystem;
         _runStats.PlayTimeSeconds = save.PlayTimeSeconds;
         foreach (var w in save.PlayerWalls)
         { var pt = new Point(w[0], w[1]);
@@ -118,8 +126,13 @@ public class Game1 : Game
         _map.RecalculatePath();
         foreach (var tr in save.Towers)
         { var type = (TowerType)tr.Type;
-          if (type == TowerType.Repair) _map.Place2x2Tower(tr.Col, tr.Row); else _map.PlaceTower(tr.Col, tr.Row);
-          var tower = new Tower(tr.Col, tr.Row, type);
+          // Zone-placed towers don't mark the cell (multiple zone towers may share one wall cell).
+          // Block-placed towers keep the classic cell-ownership semantics.
+          if (type == TowerType.Repair) _map.Place2x2Tower(tr.Col, tr.Row);
+          else if (!tr.IsZonePlaced) _map.PlaceTower(tr.Col, tr.Row);
+          var tower = tr.IsZonePlaced && type != TowerType.Repair
+              ? new Tower(tr.Col, tr.Row, type, new Vector2(tr.WorldPosX, tr.WorldPosY))
+              : new Tower(tr.Col, tr.Row, type);
           for (int lvl = 1; lvl < tr.Level; lvl++) tower.Upgrade();
           tower.TowerHealth = tr.TowerHealth; tower.AutoRebuildEnabled = tr.AutoRebuildEnabled;
           tower.PlacedDuringPrep = false; _towers.Add(tower);
@@ -153,9 +166,17 @@ public class Game1 : Game
           foreach (var rt in rts) { float d = Vector2.Distance(rt.WorldPos, wp); if (d < best) { best = d; nearest = rt; } }
           if (nearest == null) continue;
           int cost = (int)(rec.TotalInvested * GameSettings.AutoRebuildCostMultiplier);
-          if (_state.Money < cost || !_map.CanPlaceTower(rec.GridPos.X, rec.GridPos.Y)) continue;
-          _state.Money -= cost; _map.PlaceTower(rec.GridPos.X, rec.GridPos.Y);
-          var nt = new Tower(rec.GridPos.X, rec.GridPos.Y, rec.Type);
+          if (_state.Money < cost) continue;
+          // Rebuild using the same placement system the tower originally used.
+          Tower? nt;
+          if (rec.IsZonePlaced)
+          { if (!CanZonePlaceAt(rec.GridPos, rec.WorldPos)) continue;
+            _state.Money -= cost;
+            nt = new Tower(rec.GridPos.X, rec.GridPos.Y, rec.Type, rec.WorldPos); }
+          else
+          { if (!_map.CanPlaceTower(rec.GridPos.X, rec.GridPos.Y)) continue;
+            _state.Money -= cost; _map.PlaceTower(rec.GridPos.X, rec.GridPos.Y);
+            nt = new Tower(rec.GridPos.X, rec.GridPos.Y, rec.Type); }
           for (int lvl = 1; lvl < rec.Level; lvl++) nt.Upgrade();
           _towers.Add(nt); _destroyedThisWave.RemoveAt(i); AudioManager.Instance.Play("ui_upgrade", 0.5f); }
     }
@@ -189,6 +210,18 @@ public class Game1 : Game
                 _autoStartButton!.SetLabel(_state.AutoStartWaves ? "Auto ON" : "Auto OFF"); AudioManager.Instance.Play("ui_click", 0.4f); },
             () => _state.AutoStartWaves, () => true, new Color(100, 180, 220));
         _toolbar.Add(_autoStartButton); rx -= 83;
+        // Zone toggle: switches placement system between Block and Zone. Existing towers are
+        // unaffected — only new placements use the selected system. Hotkey Z.
+        _zoneButton = new ToolbarButton(new Rectangle(rx - 80, y, 80, 28),
+            _state.UsesZonePlacement ? "Z:Zone" : "Z:Block", Keys.Z,
+            () => {
+                _state.PlacementSystem = _state.UsesZonePlacement ? PlacementSystem.Block : PlacementSystem.Zone;
+                _placementSystemPref = _state.PlacementSystem;
+                _zoneButton!.SetLabel(_state.UsesZonePlacement ? "Z:Zone" : "Z:Block");
+                AudioManager.Instance.Play("ui_click", 0.4f);
+            },
+            () => _state.UsesZonePlacement, () => true, new Color(255, 140, 80));
+        _toolbar.Add(_zoneButton); rx -= 83;
         _muteButton = new ToolbarButton(new Rectangle(rx - 50, y, 50, 28), "M:Snd", Keys.M,
             () => { AudioManager.Instance.ToggleMute(); _muteButton!.SetLabel(AudioManager.Instance.Muted ? "M:OFF" : "M:Snd"); },
             () => AudioManager.Instance.Muted, () => true, new Color(180, 180, 180));
@@ -209,6 +242,14 @@ public class Game1 : Game
     private GameTime ScaleGameTime(GameTime o) { float m = _state.SpeedMultiplier;
         return m == 1f ? o : new GameTime(TimeSpan.FromTicks((long)(o.TotalGameTime.Ticks * m)),
             TimeSpan.FromTicks((long)(o.ElapsedGameTime.Ticks * m))); }
+
+    /// <summary>Builds a GameTime whose ElapsedGameTime is a fraction of one real frame —
+    /// used for substepping at speeds &gt; 10x so projectile hit-tests and enemy waypoint
+    /// advancement don't skip past objects.</summary>
+    private static GameTime ScaleGameTimeBy(GameTime o, float scale) =>
+        new GameTime(
+            TimeSpan.FromTicks((long)(o.TotalGameTime.Ticks * scale)),
+            TimeSpan.FromTicks((long)(o.ElapsedGameTime.Ticks * scale)));
 
     // ---- UPDATE ----
 
@@ -251,9 +292,22 @@ public class Game1 : Game
             if (LeftClicked(mouse)) HandlePauseClick(mouse); return; }
         if (!_state.IsGameOver)
         { _runStats.PlayTimeSeconds += (float)gameTime.ElapsedGameTime.TotalSeconds; HandleInput(kb, mouse);
-          var st = ScaleGameTime(gameTime); _waves.Update(st, _enemies, _state);
-          UpdateEnemies(st); UpdateEnemyAbilities(st); UpdateTowers(st);
-          UpdateDrones(st); UpdateProjectiles(st); UpdateFlames(st); CleanUp(); }
+          // At 15x/20x, running the whole simulation in one step would skip projectile/enemy
+          // collisions. Split into substeps so each substep stays at or below the previous
+          // 10x maximum. Below the threshold we keep the original single-step path.
+          float mul = _state.SpeedMultiplier;
+          if (mul <= GameSettings.SubstepSpeedThreshold)
+          { var st = ScaleGameTime(gameTime); _waves.Update(st, _enemies, _state);
+            UpdateEnemies(st); UpdateEnemyAbilities(st); UpdateTowers(st);
+            UpdateDrones(st); UpdateProjectiles(st); UpdateFlames(st); CleanUp(); }
+          else
+          { int steps = (int)MathF.Ceiling(mul / GameSettings.SubstepSpeedThreshold);
+            float stepScale = mul / steps;
+            for (int i = 0; i < steps && !_state.IsGameOver; i++)
+            { var st = ScaleGameTimeBy(gameTime, stepScale);
+              _waves.Update(st, _enemies, _state);
+              UpdateEnemies(st); UpdateEnemyAbilities(st); UpdateTowers(st);
+              UpdateDrones(st); UpdateProjectiles(st); UpdateFlames(st); CleanUp(); } } }
         else
         { _contextMenu.Close(); _seeds.UpdateBest(_seeds.CurrentSeed, _state.Score, _waves.CurrentWave);
           if (!_gameOverSoundPlayed) { AudioManager.Instance.Play("game_over", 0.8f); _gameOverSoundPlayed = true;
@@ -349,11 +403,33 @@ public class Game1 : Game
         if ((lc || rc) && _contextMenu.IsOpen) { _contextMenu.Close(); if (lc) return; }
         if (lc) foreach (var btn in _toolbar) if (btn.Bounds.Contains(mouse.X, mouse.Y)) { btn.OnClick(); return; }
         if (JustPressed(kb, Keys.Space)) _waves.RequestStart();
-        _hoverCell = Map.WorldToGrid(new Vector2(mouse.X, mouse.Y));
+        _mouseWorld = new Vector2(mouse.X, mouse.Y);
+        _hoverCell = Map.WorldToGrid(_mouseWorld);
+        // Two-pass hover: grid-based first so block-mode towers always match at any point
+        // inside their cell (including corners), then pixel-distance so zone-mode towers —
+        // which may share a cell with other towers — resolve to the one closest to the cursor.
         _hoveredTower = null;
-        foreach (var t in _towers) { if (t.Is2x2) { int dx = _hoverCell.X - t.GridPos.X, dy = _hoverCell.Y - t.GridPos.Y;
-            if (dx >= 0 && dx < 2 && dy >= 0 && dy < 2) { _hoveredTower = t; break; } }
-            else if (t.GridPos == _hoverCell) { _hoveredTower = t; break; } }
+        foreach (var t in _towers)
+        {
+            if (t.IsZonePlaced) continue;
+            if (t.Is2x2)
+            {
+                int dx = _hoverCell.X - t.GridPos.X, dy = _hoverCell.Y - t.GridPos.Y;
+                if (dx >= 0 && dx < 2 && dy >= 0 && dy < 2) { _hoveredTower = t; break; }
+            }
+            else if (t.GridPos == _hoverCell) { _hoveredTower = t; break; }
+        }
+        if (_hoveredTower == null)
+        {
+            float bestHoverDist = float.MaxValue;
+            foreach (var t in _towers)
+            {
+                if (!t.IsZonePlaced) continue;
+                float radius = GameSettings.CellSize / 2f;
+                float d = Vector2.Distance(t.WorldPos, _mouseWorld);
+                if (d <= radius && d < bestHoverDist) { bestHoverDist = d; _hoveredTower = t; }
+            }
+        }
         if (lc && mouse.Y > GameSettings.UIHeight) { if (_state.Mode == PlacementMode.Tower) TryPlaceTower(); else if (_state.Mode == PlacementMode.Wall) TryPlaceWall(); }
         if (rc && mouse.Y > GameSettings.UIHeight) HandleRightClick(mouse);
     }
@@ -362,7 +438,10 @@ public class Game1 : Game
     {
         if (!_map.IsInBounds(_hoverCell.X, _hoverCell.Y)) return;
         var cell = _map.Grid[_hoverCell.X, _hoverCell.Y]; var items = new List<ContextMenuItem>(); bool bw = !_waves.WaveActive;
-        if (cell == CellType.Tower && _hoveredTower != null)
+        // Zone-placed towers sit on CellType.Wall cells — use the hovered-tower reference to
+        // unlock the tower context menu regardless of the underlying cell type.
+        bool isTowerHovered = cell == CellType.Tower || (_hoveredTower != null && _hoveredTower.IsZonePlaced);
+        if (isTowerHovered && _hoveredTower != null)
         {
             var t = _hoveredTower;
             if (bw && t.PlacedDuringPrep) items.Add(new ContextMenuItem($"Remove (${t.FullRefundValue})", () => { RemoveTower(t, t.FullRefundValue); AudioManager.Instance.Play("ui_sell", 0.6f); }, Color.LightGreen));
@@ -385,7 +464,9 @@ public class Game1 : Game
     }
 
     private void RemoveTower(Tower t, int refund) { _state.Money += refund;
-        if (t.Is2x2) _map.Remove2x2Tower(t.GridPos.X, t.GridPos.Y); else _map.RemoveTower(t.GridPos.X, t.GridPos.Y);
+        // Zone-placed towers never marked the cell as Tower, so leave the wall untouched.
+        if (t.Is2x2) _map.Remove2x2Tower(t.GridPos.X, t.GridPos.Y);
+        else if (!t.IsZonePlaced) _map.RemoveTower(t.GridPos.X, t.GridPos.Y);
         RemoveDronesForTower(t); _towers.Remove(t); _hoveredTower = null; }
     private void UpgradeTower(Tower t) { if (_state.Money < t.UpgradeCost) return; int db = t.DroneCount;
         _state.Money -= t.UpgradeCost; t.Upgrade(); for (int i = db; i < t.DroneCount; i++) _drones.Add(new RepairDrone(t)); }
@@ -395,13 +476,40 @@ public class Game1 : Game
     {
         if (!_state.CanAffordTower()) return;
         if (_state.SelectedTower == TowerType.Repair)
-        { if (!_map.CanPlace2x2Tower(_hoverCell.X, _hoverCell.Y)) return; _state.SpendTower(); _map.Place2x2Tower(_hoverCell.X, _hoverCell.Y);
+        { // Repair is 2x2 — always block-mode, even when Zone is enabled. Zone placement doesn't
+          // make sense for a structure that spans a 2x2 area.
+          if (!_map.CanPlace2x2Tower(_hoverCell.X, _hoverCell.Y)) return; _state.SpendTower(); _map.Place2x2Tower(_hoverCell.X, _hoverCell.Y);
           AudioManager.Instance.Play("ui_click", 0.5f); var t = new Tower(_hoverCell.X, _hoverCell.Y, TowerType.Repair);
           if (_waves.WaveActive) t.PlacedDuringPrep = false; _towers.Add(t); _drones.Add(new RepairDrone(t)); _runStats.RecordTowerBuilt(); }
+        else if (_state.UsesZonePlacement)
+        { if (!CanZonePlaceAt(_hoverCell, _mouseWorld)) return;
+          _state.SpendTower();
+          // Zone towers do NOT mark the grid cell as CellType.Tower — multiple zone towers may
+          // coexist on the same wall cell, constrained only by the minimum-spacing rule.
+          AudioManager.Instance.Play("ui_click", 0.5f);
+          var t = new Tower(_hoverCell.X, _hoverCell.Y, _state.SelectedTower, _mouseWorld);
+          if (_waves.WaveActive) t.PlacedDuringPrep = false; _towers.Add(t); _runStats.RecordTowerBuilt(); }
         else
         { if (!_map.CanPlaceTower(_hoverCell.X, _hoverCell.Y)) return; _state.SpendTower(); _map.PlaceTower(_hoverCell.X, _hoverCell.Y);
           AudioManager.Instance.Play("ui_click", 0.5f); var t = new Tower(_hoverCell.X, _hoverCell.Y, _state.SelectedTower);
           if (_waves.WaveActive) t.PlacedDuringPrep = false; _towers.Add(t); _runStats.RecordTowerBuilt(); }
+    }
+
+    /// <summary>Zone-mode placement check: cursor must be over a wall cell (not path/spawn/exit
+    /// or a block-mode tower), and must be at least <see cref="GameSettings.ZoneMinTowerSpacing"/>
+    /// pixels away from every other tower. Repair towers are treated as large footprints.</summary>
+    private bool CanZonePlaceAt(Point cell, Vector2 worldPos)
+    {
+        if (!_map.IsInBounds(cell.X, cell.Y)) return false;
+        if (_map.Grid[cell.X, cell.Y] != CellType.Wall) return false;
+        foreach (var t in _towers)
+        {
+            float spacing = t.Is2x2
+                ? GameSettings.ZoneMinTowerSpacing + GameSettings.CellSize / 2f
+                : GameSettings.ZoneMinTowerSpacing;
+            if (Vector2.Distance(t.WorldPos, worldPos) < spacing) return false;
+        }
+        return true;
     }
 
     private void TryPlaceWall()
@@ -470,8 +578,10 @@ public class Game1 : Game
         if (_pendingSpawns.Count > 0) _enemies.AddRange(_pendingSpawns);
         bool rebuildDr = false;
         for (int i = _towers.Count - 1; i >= 0; i--) { if (_towers[i].IsDestroyed) { var t = _towers[i];
-            if (t.Type != TowerType.Repair) _destroyedThisWave.Add(new DestroyedTowerRecord(t.Type, t.GridPos, t.Level, t.TotalInvested));
-            if (t.Is2x2) _map.Remove2x2Tower(t.GridPos.X, t.GridPos.Y); else _map.RemoveTower(t.GridPos.X, t.GridPos.Y);
+            if (t.Type != TowerType.Repair) _destroyedThisWave.Add(new DestroyedTowerRecord(t.Type, t.GridPos, t.Level, t.TotalInvested, t.IsZonePlaced, t.WorldPos));
+            // Zone-placed towers don't own their cell, so leave the wall intact on destruction.
+            if (t.Is2x2) _map.Remove2x2Tower(t.GridPos.X, t.GridPos.Y);
+            else if (!t.IsZonePlaced) _map.RemoveTower(t.GridPos.X, t.GridPos.Y);
             if (t.Type == TowerType.Repair) rebuildDr = true; _towers.RemoveAt(i); if (_hoveredTower == t) _hoveredTower = null; } }
         if (rebuildDr) { _drones.Clear(); foreach (var t in _towers) if (t.Type == TowerType.Repair) for (int d = 0; d < t.DroneCount; d++) _drones.Add(new RepairDrone(t)); }
         _projectiles.RemoveAll(p => !p.IsActive); _flames.RemoveAll(f => !f.IsAlive);
@@ -507,7 +617,7 @@ public class Game1 : Game
             DrawCentred($"{star}Seed {fav.Seed}  |  Best: {fav.BestScore} pts  Wave {fav.BestWave}", cx, y, Color.LightGray); y += 24; if (y > 640) break; } }
         if (_leaderboard.Career.TotalGamesPlayed > 0)
         { var c = _leaderboard.Career; DrawCentred($"Career: {c.TotalGamesPlayed} games  {c.TotalKills} kills  Best wave {c.HighestWave}  Best score {c.HighestScore}", cx, GameSettings.ScreenHeight - 60, Color.DimGray); }
-        DrawCentred("1-9: Towers | W: Wall | +/-: Speed | R-Click: Sell/Upgrade | SPACE: Wave | M: Mute", cx, GameSettings.ScreenHeight - 30, Color.DimGray);
+        DrawCentred("1-9: Towers | W: Wall | Z: Block/Zone | +/-: Speed | R-Click: Sell/Upgrade | SPACE: Wave | M: Mute", cx, GameSettings.ScreenHeight - 30, Color.DimGray);
     }
 
     private void DrawSettings()
@@ -530,7 +640,7 @@ public class Game1 : Game
         var backRect = new Rectangle((int)(cx - 60), y, 120, 32);
         _spriteBatch.Draw(_sprites.Pixel, backRect, new Color(60, 60, 80)); DrawCentred("[ESC] Back", cx, y + 7, Color.LightGray); y += 60;
         string desc = _selectedDifficulty switch { Difficulty.Easy => "Easy: 30 lives, $200 start, enemies have 70% HP / 90% speed, 130% rewards",
-            Difficulty.Hard => "Hard: 10 lives, $75 start, enemies have 140% HP / 110% speed, 75% rewards",
+            Difficulty.Hard => "Hard: 12 lives, $85 start, enemies have 125% HP / 105% speed, 85% rewards",
             _ => "Normal: 20 lives, $100 start, standard enemy stats and rewards" };
         DrawCentred(desc, cx, y, Color.DimGray);
     }
@@ -577,6 +687,22 @@ public class Game1 : Game
           if (canPlace) { var t = new Tower(_hoverCell.X, _hoverCell.Y, TowerType.Repair); int size = GameSettings.CellSize * 2 - 4;
             _spriteBatch.Draw(_sprites.Towers[TowerType.Repair], new Rectangle((int)(t.WorldPos.X - size / 2f), (int)(t.WorldPos.Y - size / 2f), size, size), Color.White * 0.5f);
             t.DrawRange(_spriteBatch, _sprites.Ring); } }
+        else if (_state.Mode == PlacementMode.Tower && _state.UsesZonePlacement)
+        { // Zone ghost follows the mouse exactly. Visual cue: a faint zone outline on the
+          // hovered wall cell so players see where the placement zone starts.
+          int size = GameSettings.CellSize - 4;
+          var ghostRect = new Rectangle((int)(_mouseWorld.X - size / 2f), (int)(_mouseWorld.Y - size / 2f), size, size);
+          if (_map.IsInBounds(_hoverCell.X, _hoverCell.Y) && _map.Grid[_hoverCell.X, _hoverCell.Y] == CellType.Wall)
+          {
+              var cellRect = new Rectangle(_hoverCell.X * GameSettings.CellSize, _hoverCell.Y * GameSettings.CellSize + GameSettings.UIHeight,
+                  GameSettings.CellSize, GameSettings.CellSize);
+              _spriteBatch.Draw(_sprites.Pixel, cellRect, new Color(255, 140, 80) * 0.15f);
+          }
+          if (!CanZonePlaceAt(_hoverCell, _mouseWorld) || !_state.CanAffordTower())
+          { if (!_map.IsInBounds(_hoverCell.X, _hoverCell.Y) || _map.Grid[_hoverCell.X, _hoverCell.Y] != CellType.Wall) return;
+            _spriteBatch.Draw(_sprites.Pixel, ghostRect, Color.Red * 0.25f); return; }
+          _spriteBatch.Draw(_sprites.Towers[_state.SelectedTower], ghostRect, Color.White * 0.5f);
+          new Tower(_hoverCell.X, _hoverCell.Y, _state.SelectedTower, _mouseWorld).DrawRange(_spriteBatch, _sprites.Ring); }
         else if (_state.Mode == PlacementMode.Tower)
         { var pos = Map.GridToWorld(_hoverCell.X, _hoverCell.Y); int size = GameSettings.CellSize - 4;
           var rect = new Rectangle((int)(pos.X - size / 2f), (int)(pos.Y - size / 2f), size, size);

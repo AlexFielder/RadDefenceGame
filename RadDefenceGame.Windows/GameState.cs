@@ -13,6 +13,14 @@ public class GameState
     public TowerType SelectedTower { get; set; } = TowerType.Basic;
     public bool AutoStartWaves { get; set; } = false;
 
+    /// <summary>
+    /// Controls whether towers snap to block centres (Block) or can be placed
+    /// freely anywhere within wall cells (Zone). Persists across runs via the
+    /// title-screen toggle on Game1.
+    /// </summary>
+    public PlacementSystem PlacementSystem { get; set; } = PlacementSystem.Block;
+    public bool UsesZonePlacement => PlacementSystem == PlacementSystem.Zone;
+
     // -- speed system --
     private int _speedIndex = GameSettings.DefaultSpeedIndex;
     public float SpeedMultiplier => GameSettings.SpeedSteps[_speedIndex];
@@ -48,5 +56,6 @@ public class GameState
         Mode = PlacementMode.Tower;
         SelectedTower = TowerType.Basic;
         _speedIndex = GameSettings.DefaultSpeedIndex;
+        // PlacementSystem deliberately not reset — it's a global preference.
     }
 }
