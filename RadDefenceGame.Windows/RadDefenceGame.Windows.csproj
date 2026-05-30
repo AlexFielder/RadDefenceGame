@@ -32,9 +32,13 @@
     <Compile Include="Projectile.cs" />
     <Compile Include="FlameParticle.cs" />
     <Compile Include="RepairDrone.cs" />
+    <Compile Include="AttackDrone.cs" />
+    <Compile Include="MortarShell.cs" />
     <Compile Include="WaveManager.cs" />
     <Compile Include="PlacementMode.cs" />
     <Compile Include="ToolbarButton.cs" />
+    <Compile Include="ToolbarStyle.cs" />
+    <Compile Include="ToolbarPrefs.cs" />
     <Compile Include="ContextMenu.cs" />
     <Compile Include="SeedManager.cs" />
     <Compile Include="SpriteSet.cs" />
@@ -56,7 +60,7 @@
   <PropertyGroup>
     <AssemblyTitle>RadDefenceGame.Windows</AssemblyTitle>
     <Product>RadDefenceGame.Windows</Product>
-    <Copyright>Copyright © 2026</Copyright>
+    <Copyright>Copyright (c) 2026</Copyright>
     <AssemblyVersion>1.1.0.0</AssemblyVersion>
     <FileVersion>1.1.0.0</FileVersion>
   </PropertyGroup>

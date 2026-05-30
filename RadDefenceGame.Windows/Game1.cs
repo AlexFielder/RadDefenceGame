@@ -26,6 +26,8 @@ public class Game1 : Game
     private readonly List<FlameParticle> _flames = new();
     private readonly List<Enemy> _pendingSpawns = new();
     private readonly List<RepairDrone> _drones = new();
+    private readonly List<AttackDrone> _attackDrones = new();
+    private readonly List<MortarShell> _shells = new();
 
     private record DestroyedTowerRecord(TowerType Type, Point GridPos, int Level, int TotalInvested,
         bool IsZonePlaced, Vector2 WorldPos);
@@ -46,6 +48,22 @@ public class Game1 : Game
     private ToolbarButton? _autoStartButton;
     private ToolbarButton? _muteButton;
     private readonly ContextMenu _contextMenu = new();
+
+    // Toolbar layout / persistence
+    private ToolbarPrefs _toolbarPrefs = new();
+    // Dropdowns (Grouped style): when a category button is clicked, _openDropdown holds
+    // the list of tower-button entries to render as a vertical popup. Closes on outside click.
+    private List<ToolbarButton>? _openDropdown;
+    private Rectangle _openDropdownBounds;
+    private ToolbarButton? _openDropdownAnchor;
+    // Drag (Custom style): tracks press-drag-release to detect rearrange vs click.
+    private ToolbarButton? _dragCandidate;
+    private Point _dragStart;
+    private bool _dragActive;
+
+    // Cone-aim offset applied to the next Mortar/Artillery placement. Adjusted by the
+    // mouse wheel — one notch (120 wheel units) = 90°. Reset to 0 after each placement.
+    private float _pendingConeAimOffset;
 
     private bool _autoStartPref = false;
     // Zone-placement preference is sticky across runs once toggled, like _autoStartPref.
@@ -90,6 +108,7 @@ public class Game1 : Game
         AudioManager.Init();
         AudioManager.Instance.LoadFromDirectory(Path.Combine(Content.RootDirectory, "Audio"));
         _leaderboard = Leaderboard.Load();
+        _toolbarPrefs = ToolbarPrefs.Load();
         _seeds = new SeedManager();
         _seeds.NewRandomSeed();
     }
@@ -102,7 +121,8 @@ public class Game1 : Game
         _waves = new WaveManager(_map); _waves.SetSprites(_sprites);
         _waves.OnWaveStarting += OnWaveStarting; _waves.OnWaveCompleted += OnWaveCompleted;
         _enemies.Clear(); _towers.Clear(); _projectiles.Clear(); _flames.Clear();
-        _pendingSpawns.Clear(); _drones.Clear(); _destroyedThisWave.Clear();
+        _pendingSpawns.Clear(); _drones.Clear(); _attackDrones.Clear(); _shells.Clear();
+        _destroyedThisWave.Clear();
         _contextMenu.Close(); _screen = GameScreen.Playing;
         _seedInput = ""; _seedInputActive = false;
         _gameOverSoundPlayed = false; _paused = false; _lastRank = 0;
@@ -128,15 +148,42 @@ public class Game1 : Game
         { var type = (TowerType)tr.Type;
           // Zone-placed towers don't mark the cell (multiple zone towers may share one wall cell).
           // Block-placed towers keep the classic cell-ownership semantics.
+          // Electric Fence sits on a path tile and never marks the grid as Tower/Wall.
           if (type == TowerType.Repair) _map.Place2x2Tower(tr.Col, tr.Row);
+          else if (type == TowerType.ElectricFence) { /* nothing — fence lives on a path cell */ }
           else if (!tr.IsZonePlaced) _map.PlaceTower(tr.Col, tr.Row);
           var tower = tr.IsZonePlaced && type != TowerType.Repair
               ? new Tower(tr.Col, tr.Row, type, new Vector2(tr.WorldPosX, tr.WorldPosY))
               : new Tower(tr.Col, tr.Row, type);
-          for (int lvl = 1; lvl < tr.Level; lvl++) tower.Upgrade();
+          if (type == TowerType.DroneController)
+          {
+              // Replay the saved upgrade-track sequence so ChosenPath / RangeUpgradesApplied
+              // exactly match the saved tower.
+              int ranged = tr.RangeUpgrades;
+              int countOnly = (tr.Level - 1) - ranged;
+              for (int i = 0; i < ranged; i++) tower.UpgradeRange();
+              for (int i = 0; i < countOnly; i++) tower.UpgradeCount();
+          }
+          else for (int lvl = 1; lvl < tr.Level; lvl++) tower.Upgrade();
           tower.TowerHealth = tr.TowerHealth; tower.AutoRebuildEnabled = tr.AutoRebuildEnabled;
-          tower.PlacedDuringPrep = false; _towers.Add(tower);
-          if (type == TowerType.Repair) for (int d = 0; d < tower.DroneCount; d++) _drones.Add(new RepairDrone(tower)); }
+          tower.PlacedDuringPrep = false;
+          if (type == TowerType.Mortar || type == TowerType.Artillery || type == TowerType.ElectricFence)
+          {
+              // Prefer the saved facing; if absent (older save), reconstruct from current map state.
+              if (tr.ConeFacing != 0f) tower.SetFacing(tr.ConeFacing);
+              else if (type == TowerType.ElectricFence)
+              { var pd = _map.GetPathDirectionAt(tr.Col, tr.Row); tower.SetFacing(MathF.Atan2(pd.Y, pd.X)); }
+              else
+              { Vector2 nearest = Vector2.Zero; float bd = float.MaxValue;
+                foreach (var wp in _map.CurrentPath)
+                { float d = Vector2.Distance(tower.WorldPos, wp); if (d < bd) { bd = d; nearest = wp; } }
+                var diff = nearest - tower.WorldPos;
+                if (diff.LengthSquared() > 0.001f) tower.SetFacing(MathF.Atan2(diff.Y, diff.X));
+              }
+          }
+          _towers.Add(tower);
+          if (type == TowerType.Repair) for (int d = 0; d < tower.DroneCount; d++) _drones.Add(new RepairDrone(tower));
+          if (type == TowerType.DroneController) SyncAttackDronesFor(tower); }
         _waves.SetWave(save.Wave); SaveManager.DeleteSave();
     }
 
@@ -184,22 +231,177 @@ public class Game1 : Game
     private void OpenGlossary() { _glossaryReturnScreen = _screen; _screen = GameScreen.Glossary; _glossaryIndex = 0; AudioManager.Instance.Play("ui_click", 0.4f); }
     private void OpenSettings(GameScreen returnTo) { _settingsReturnScreen = returnTo; _screen = GameScreen.Settings; AudioManager.Instance.Play("ui_click", 0.4f); }
 
+    // ---------- TOWER CATALOGUE (the single source of truth for button labels/colors/hotkeys) ----------
+
+    private record TowerCatalogEntry(TowerType Type, string Short, string Name, int Cost, Color Accent, Keys Hotkey, ToolbarGroup Group);
+    private enum ToolbarGroup { Guns, Heavy, Special, Utility }
+
+    private static readonly TowerCatalogEntry[] TowerCatalog =
+    {
+        new(TowerType.Basic,            "Gun",  "Gun",          GameSettings.BasicTowerCost,           new Color(0, 150, 255),   Keys.D1, ToolbarGroup.Guns),
+        new(TowerType.Sniper,           "Snp",  "Sniper",       GameSettings.SniperTowerCost,          new Color(255, 100, 0),   Keys.D2, ToolbarGroup.Guns),
+        new(TowerType.Rapid,            "Rpd",  "Rapid",        GameSettings.RapidTowerCost,           new Color(0, 255, 100),   Keys.D3, ToolbarGroup.Guns),
+        new(TowerType.Rocket,           "Rkt",  "Rocket",       GameSettings.RocketTowerCost,          new Color(200, 50, 30),   Keys.D4, ToolbarGroup.Heavy),
+        new(TowerType.Flame,            "Flm",  "Flame",        GameSettings.FlameTowerCost,           new Color(255, 140, 0),   Keys.D5, ToolbarGroup.Special),
+        new(TowerType.Tesla,            "Tsl",  "Tesla",        GameSettings.TeslaTowerCost,           new Color(100, 220, 255), Keys.D6, ToolbarGroup.Special),
+        new(TowerType.Tachyon,          "Tch",  "Tachyon",      GameSettings.TachyonTowerCost,         new Color(220, 200, 50),  Keys.D7, ToolbarGroup.Special),
+        new(TowerType.Grinder,          "Grd",  "Grinder",      GameSettings.GrinderTowerCost,         new Color(200, 80, 80),   Keys.D8, ToolbarGroup.Utility),
+        new(TowerType.Repair,           "Rpr",  "Repair",       GameSettings.RepairTowerCost,          new Color(80, 220, 80),   Keys.D9, ToolbarGroup.Utility),
+        new(TowerType.Mortar,           "Mtr",  "Mortar",       GameSettings.MortarTowerCost,          new Color(150, 120, 90),  Keys.D0, ToolbarGroup.Heavy),
+        new(TowerType.Artillery,        "Art",  "Artillery",    GameSettings.ArtilleryTowerCost,       new Color(180, 140, 60),  Keys.A,  ToolbarGroup.Heavy),
+        new(TowerType.DroneController,  "Drn",  "Drone Ctrl",   GameSettings.DroneControllerCost,      new Color(120, 180, 255), Keys.D,  ToolbarGroup.Utility),
+        new(TowerType.ElectricFence,    "Fnc",  "E-Fence",      GameSettings.ElectricFenceCost,        new Color(255, 220, 80),  Keys.E,  ToolbarGroup.Utility),
+    };
+
+    private static TowerCatalogEntry GetCatalog(TowerType t)
+    {
+        foreach (var c in TowerCatalog) if (c.Type == t) return c;
+        throw new System.ArgumentException($"No catalog entry for {t}");
+    }
+
+    private static string KeyShort(Keys k) => k switch
+    {
+        Keys.D0 => "0", Keys.D1 => "1", Keys.D2 => "2", Keys.D3 => "3", Keys.D4 => "4",
+        Keys.D5 => "5", Keys.D6 => "6", Keys.D7 => "7", Keys.D8 => "8", Keys.D9 => "9",
+        _ => k.ToString()
+    };
+
+    // ---------- TOOLBAR BUILD (dispatches by current style) ----------
+
     private void BuildToolbar()
     {
-        _toolbar.Clear(); int y = 44, x = 10, gap = 3, bw = 82;
-        AddTowerButton(ref x, y, gap, bw, "1:Gun $50", Keys.D1, TowerType.Basic, GameSettings.BasicTowerCost, new Color(0, 150, 255));
-        AddTowerButton(ref x, y, gap, bw, "2:Snp $100", Keys.D2, TowerType.Sniper, GameSettings.SniperTowerCost, new Color(255, 100, 0));
-        AddTowerButton(ref x, y, gap, bw, "3:Rpd $75", Keys.D3, TowerType.Rapid, GameSettings.RapidTowerCost, new Color(0, 255, 100));
-        AddTowerButton(ref x, y, gap, bw, "4:Rkt $150", Keys.D4, TowerType.Rocket, GameSettings.RocketTowerCost, new Color(200, 50, 30));
-        AddTowerButton(ref x, y, gap, bw, "5:Flm $125", Keys.D5, TowerType.Flame, GameSettings.FlameTowerCost, new Color(255, 140, 0));
-        AddTowerButton(ref x, y, gap, bw, "6:Tsl $120", Keys.D6, TowerType.Tesla, GameSettings.TeslaTowerCost, new Color(100, 220, 255));
-        AddTowerButton(ref x, y, gap, bw, "7:Tch $100", Keys.D7, TowerType.Tachyon, GameSettings.TachyonTowerCost, new Color(220, 200, 50));
-        AddTowerButton(ref x, y, gap, bw, "8:Grd $200", Keys.D8, TowerType.Grinder, GameSettings.GrinderTowerCost, new Color(200, 80, 80));
-        AddTowerButton(ref x, y, gap, bw, "9:Rpr $300", Keys.D9, TowerType.Repair, GameSettings.RepairTowerCost, new Color(80, 220, 80));
+        _toolbar.Clear();
+        CloseDropdown();
+        // Cancel any in-progress drag — its target reference would be stale after rebuild.
+        _dragCandidate = null;
+        _dragActive = false;
+        try
+        {
+            switch (_toolbarPrefs.Style)
+            {
+                case ToolbarStyle.Compact:  BuildToolbarCompact(); break;
+                case ToolbarStyle.Grouped:  BuildToolbarGrouped(); break;
+                case ToolbarStyle.TwoRow:   BuildToolbarTwoRow(); break;
+                case ToolbarStyle.Custom:   BuildToolbarCustom(); break;
+            }
+        }
+        catch (System.Exception ex)
+        {
+            // If a layout throws for any reason, fall back to Compact so the player isn't
+            // locked out of the game with a broken toolbar. Surface the error to the debug log.
+            System.Diagnostics.Debug.WriteLine($"BuildToolbar({_toolbarPrefs.Style}) threw: {ex}");
+            _toolbar.Clear();
+            _toolbarPrefs.Style = ToolbarStyle.Compact;
+            BuildToolbarCompact();
+        }
+        BuildRightSideButtons();
+    }
+
+    private void BuildToolbarCompact()
+    {
+        int y = 44, x = 10, gap = 3, bw = 72;
+        foreach (var c in TowerCatalog)
+            AddTowerButton(ref x, y, gap, bw, $"{KeyShort(c.Hotkey)}:{c.Short} ${c.Cost}", c.Hotkey, c.Type, c.Cost, c.Accent);
         x += 4;
-        _toolbar.Add(new ToolbarButton(new Rectangle(x, y, 60, 28), "W:Wall", Keys.W,
+        _toolbar.Add(MakeWallButton(x, y, 60, 28));
+    }
+
+    private void BuildToolbarTwoRow()
+    {
+        // Two horizontal rows; row 1 = guns + heavy + special, row 2 = utility/path + wall.
+        // Buttons are 17 tall to fit cleanly inside the existing 80-px UI bar.
+        int y1 = 42, y2 = 61, h = 17, gap = 3, bw = 78;
+        int x = 10;
+        foreach (var c in TowerCatalog)
+            if (c.Group == ToolbarGroup.Guns || c.Group == ToolbarGroup.Heavy || c.Group == ToolbarGroup.Special)
+                AddTowerButton(ref x, y1, gap, bw, $"{KeyShort(c.Hotkey)}:{c.Short} ${c.Cost}", c.Hotkey, c.Type, c.Cost, c.Accent, h);
+        x = 10;
+        foreach (var c in TowerCatalog)
+            if (c.Group == ToolbarGroup.Utility)
+                AddTowerButton(ref x, y2, gap, bw, $"{KeyShort(c.Hotkey)}:{c.Short} ${c.Cost}", c.Hotkey, c.Type, c.Cost, c.Accent, h);
+        x += 4;
+        _toolbar.Add(MakeWallButton(x, y2, 60, h));
+    }
+
+    private void BuildToolbarGrouped()
+    {
+        // Category buttons. Clicking opens a vertical dropdown of the towers in that group.
+        // Hotkeys still pick towers directly so keyboard users aren't slowed down.
+        _categoryAnchors.Clear();
+        int y = 44, x = 10, gap = 6, bw = 110;
+        var groupSpecs = new (ToolbarGroup g, string label, Color accent)[]
+        {
+            (ToolbarGroup.Guns,    "Guns",    new Color(0, 200, 255)),
+            (ToolbarGroup.Heavy,   "Heavy",   new Color(220, 100, 60)),
+            (ToolbarGroup.Special, "Special", new Color(220, 200, 80)),
+            (ToolbarGroup.Utility, "Utility", new Color(160, 220, 160)),
+        };
+        foreach (var spec in groupSpecs)
+        {
+            var bounds = new Rectangle(x, y, bw, 28);
+            var grp = spec.g; var label = spec.label; var ac = spec.accent;
+            ToolbarButton btn = null!;
+            btn = new ToolbarButton(bounds, label + "  v", null,
+                () => ToggleDropdown(btn, grp),
+                () => _openDropdown != null && _openDropdownAnchor != null && ReferenceEquals(_openDropdownAnchor, btn),
+                () => true, ac);
+            _toolbar.Add(btn);
+            _categoryAnchors[btn] = grp;
+            x += bw + gap;
+        }
+        _toolbar.Add(MakeWallButton(x, y, 60, 28));
+        // Register hidden hotkey buttons so number keys still pick towers even when no
+        // dropdown is open.
+        BuildHiddenHotkeyButtons();
+    }
+
+    private void BuildToolbarCustom()
+    {
+        // Same layout as Compact, but the order comes from _toolbarPrefs.CustomOrder and
+        // the user can drag-rearrange. If CustomOrder is empty, fall back to catalogue order.
+        int y = 44, x = 10, gap = 3, bw = 72;
+        var order = new List<TowerType>();
+        if (_toolbarPrefs.CustomOrder.Count > 0)
+        {
+            foreach (var v in _toolbarPrefs.CustomOrder)
+                if (System.Enum.IsDefined(typeof(TowerType), v)) order.Add((TowerType)v);
+            // Append any catalogue towers that aren't yet in the saved order (handles new
+            // tower types added after the user last saved).
+            foreach (var c in TowerCatalog) if (!order.Contains(c.Type)) order.Add(c.Type);
+        }
+        else foreach (var c in TowerCatalog) order.Add(c.Type);
+
+        foreach (var tt in order)
+        {
+            var c = GetCatalog(tt);
+            AddTowerButton(ref x, y, gap, bw, $"{KeyShort(c.Hotkey)}:{c.Short} ${c.Cost}", c.Hotkey, c.Type, c.Cost, c.Accent);
+        }
+        x += 4;
+        _toolbar.Add(MakeWallButton(x, y, 60, 28));
+    }
+
+    /// <summary>For Grouped mode: hotkey-only tower buttons that aren't drawn in the bar
+    /// but still respond to keyboard input. Bounds are zero-sized so mouse clicks ignore them.</summary>
+    private void BuildHiddenHotkeyButtons()
+    {
+        foreach (var c in TowerCatalog)
+        {
+            var captured = c;
+            _toolbar.Add(new ToolbarButton(Rectangle.Empty,
+                "", captured.Hotkey,
+                () => SelectTower(captured.Type),
+                () => false, () => false, captured.Accent, captured.Type));
+        }
+    }
+
+    private ToolbarButton MakeWallButton(int x, int y, int w, int h) =>
+        new(new Rectangle(x, y, w, h), "W:Wall", Keys.W,
             () => { _state.Mode = PlacementMode.Wall; AudioManager.Instance.Play("ui_click", 0.4f); },
-            () => _state.Mode == PlacementMode.Wall, () => _state.HasWalls(), new Color(160, 120, 200)));
+            () => _state.Mode == PlacementMode.Wall, () => _state.HasWalls(), new Color(160, 120, 200));
+
+    private void BuildRightSideButtons()
+    {
+        int y = 44;
         int rx = GameSettings.ScreenWidth - 10;
         _speedButton = new ToolbarButton(new Rectangle(rx - 90, y, 90, 28), $"Spd {_state.SpeedLabel}", null,
             () => { _state.CycleSpeed(); UpdateSpeedLabel(); AudioManager.Instance.Play("ui_click", 0.4f); },
@@ -210,8 +412,6 @@ public class Game1 : Game
                 _autoStartButton!.SetLabel(_state.AutoStartWaves ? "Auto ON" : "Auto OFF"); AudioManager.Instance.Play("ui_click", 0.4f); },
             () => _state.AutoStartWaves, () => true, new Color(100, 180, 220));
         _toolbar.Add(_autoStartButton); rx -= 83;
-        // Zone toggle: switches placement system between Block and Zone. Existing towers are
-        // unaffected — only new placements use the selected system. Hotkey Z.
         _zoneButton = new ToolbarButton(new Rectangle(rx - 80, y, 80, 28),
             _state.UsesZonePlacement ? "Z:Zone" : "Z:Block", Keys.Z,
             () => {
@@ -229,10 +429,96 @@ public class Game1 : Game
     }
 
     private void UpdateSpeedLabel() => _speedButton?.SetLabel($"Spd {_state.SpeedLabel}");
-    private void AddTowerButton(ref int x, int y, int gap, int w, string label, Keys hotkey, TowerType type, int cost, Color accent)
-    { _toolbar.Add(new ToolbarButton(new Rectangle(x, y, w, 28), label, hotkey,
-        () => { _state.Mode = PlacementMode.Tower; _state.SelectedTower = type; AudioManager.Instance.Play("ui_click", 0.4f); },
-        () => _state.Mode == PlacementMode.Tower && _state.SelectedTower == type, () => _state.Money >= cost, accent)); x += w + gap; }
+
+    private void AddTowerButton(ref int x, int y, int gap, int w, string label, Keys hotkey, TowerType type, int cost, Color accent, int h = 28)
+    { _toolbar.Add(new ToolbarButton(new Rectangle(x, y, w, h), label, hotkey,
+        () => SelectTower(type),
+        () => _state.Mode == PlacementMode.Tower && _state.SelectedTower == type, () => _state.Money >= cost, accent, type));
+      x += w + gap; }
+
+    private void SelectTower(TowerType type)
+    {
+        _state.Mode = PlacementMode.Tower;
+        _state.SelectedTower = type;
+        // Reset the wheel-applied cone aim whenever the player changes selection so a
+        // half-rotated offset from a previous tower doesn't carry over silently.
+        _pendingConeAimOffset = 0f;
+        AudioManager.Instance.Play("ui_click", 0.4f);
+        CloseDropdown();
+    }
+
+    // ---------- DROPDOWN (Grouped style) ----------
+
+    /// <summary>Map from category button → its toolbar group, populated during BuildToolbarGrouped.
+    /// Lets us identify which group an anchor button represents without parsing labels.</summary>
+    private readonly Dictionary<ToolbarButton, ToolbarGroup> _categoryAnchors = new();
+
+    private void ToggleDropdown(ToolbarButton anchor, ToolbarGroup g)
+    {
+        AudioManager.Instance.Play("ui_click", 0.4f);
+        if (_openDropdown != null && ReferenceEquals(_openDropdownAnchor, anchor)) { CloseDropdown(); return; }
+        OpenDropdownFor(anchor, g);
+    }
+
+    private void OpenDropdownFor(ToolbarButton anchor, ToolbarGroup g)
+    {
+        var items = new List<ToolbarButton>();
+        int itemH = 28, itemW = 150;
+        int ix = anchor.Bounds.X;
+        int iy = anchor.Bounds.Bottom + 4;
+        int row = 0;
+        foreach (var c in TowerCatalog)
+        {
+            if (c.Group != g) continue;
+            var bounds = new Rectangle(ix, iy + row * (itemH + 2), itemW, itemH);
+            var cc = c;
+            items.Add(new ToolbarButton(bounds, $"{KeyShort(cc.Hotkey)}:{cc.Name} ${cc.Cost}", cc.Hotkey,
+                () => SelectTower(cc.Type),
+                () => _state.Mode == PlacementMode.Tower && _state.SelectedTower == cc.Type,
+                () => _state.Money >= cc.Cost, cc.Accent, cc.Type));
+            row++;
+        }
+        _openDropdown = items;
+        _openDropdownAnchor = anchor;
+        _openDropdownBounds = new Rectangle(ix - 4, iy - 4, itemW + 8, row * (itemH + 2) + 6);
+    }
+
+    private void CloseDropdown()
+    {
+        _openDropdown = null;
+        _openDropdownAnchor = null;
+        _openDropdownBounds = Rectangle.Empty;
+    }
+
+    // ---------- DRAG (Custom style) ----------
+
+    /// <summary>Persist the current order of tower buttons to <see cref="_toolbarPrefs"/>.</summary>
+    private void SaveCustomOrder()
+    {
+        _toolbarPrefs.CustomOrder.Clear();
+        foreach (var b in _toolbar)
+            if (b.TowerType.HasValue && b.Bounds.Width > 0)
+                _toolbarPrefs.CustomOrder.Add((int)b.TowerType.Value);
+        _toolbarPrefs.Save();
+    }
+
+    /// <summary>Swap two tower buttons in _toolbar (by reference) and re-pack bounds along the row.</summary>
+    private void SwapTowerButtons(ToolbarButton a, ToolbarButton b)
+    {
+        int ia = _toolbar.IndexOf(a), ib = _toolbar.IndexOf(b);
+        if (ia < 0 || ib < 0) return;
+        _toolbar[ia] = b; _toolbar[ib] = a;
+        // Re-pack: walk the tower buttons in their new order and reassign bounds based on
+        // their original visual position.
+        int x = 10, y = 44, gap = 3, bw = 72;
+        foreach (var btn in _toolbar)
+        {
+            if (!btn.TowerType.HasValue || btn.Bounds.Width == 0) continue;
+            btn.SetBounds(new Rectangle(x, y, bw, 28));
+            x += bw + gap;
+        }
+        SaveCustomOrder();
+    }
 
     private void OnTextInput(object? sender, TextInputEventArgs e)
     { if (_screen != GameScreen.Title || !_seedInputActive) return;
@@ -368,6 +654,42 @@ public class Game1 : Game
         }
         y += 50;
 
+        // Toolbar style picker (clickable; cycles or jumps to chosen style)
+        y += 30;
+        if (clicked)
+        {
+            int sbw = 95;
+            for (int i = 0; i < 4; i++)
+            {
+                var r = new Rectangle(panelX + i * (sbw + 5), y, sbw, 30);
+                if (r.Contains(mouse.X, mouse.Y))
+                {
+                    var picked = (ToolbarStyle)i;
+                    if (picked != _toolbarPrefs.Style)
+                    {
+                        _toolbarPrefs.Style = picked;
+                        _toolbarPrefs.Save();
+                        // Rebuild the toolbar if we have one (i.e. we're in-game).
+                        if (_state != null) BuildToolbar();
+                        AudioManager.Instance.Play("ui_click", 0.4f);
+                    }
+                }
+            }
+            // Reset-order button (only meaningful in Custom mode) — clears CustomOrder.
+            if (_toolbarPrefs.Style == ToolbarStyle.Custom)
+            {
+                var resetR = new Rectangle(panelX, y + 36, 200, 24);
+                if (resetR.Contains(mouse.X, mouse.Y))
+                {
+                    _toolbarPrefs.CustomOrder.Clear();
+                    _toolbarPrefs.Save();
+                    if (_state != null) BuildToolbar();
+                    AudioManager.Instance.Play("ui_click", 0.4f);
+                }
+            }
+        }
+        y += 70; // header + style-row + (reset row reserved for Custom)
+
         // SFX slider (responds to click AND drag)
         y += 30;
         var sfxBar = new Rectangle(panelX, y, panelW, 20);
@@ -394,14 +716,85 @@ public class Game1 : Game
     private void HandleInput(KeyboardState kb, MouseState mouse)
     {
         bool lc = LeftClicked(mouse);
+        bool ld = mouse.LeftButton == ButtonState.Pressed;
+        bool lr = mouse.LeftButton == ButtonState.Released && _prevMouse.LeftButton == ButtonState.Pressed;
         bool rc = mouse.RightButton == ButtonState.Pressed && _prevMouse.RightButton == ButtonState.Released;
         if (JustPressed(kb, Keys.OemPlus) || JustPressed(kb, Keys.Add)) { _state.SpeedUp(); UpdateSpeedLabel(); AudioManager.Instance.Play("ui_click", 0.3f); }
         if (JustPressed(kb, Keys.OemMinus) || JustPressed(kb, Keys.Subtract)) { _state.SlowDown(); UpdateSpeedLabel(); AudioManager.Instance.Play("ui_click", 0.3f); }
+
+        // Mouse-wheel cone-aim rotation: each notch of the wheel rotates the next
+        // Mortar/Artillery placement by 90°. Sign chosen so wheel-up = clockwise (positive Y up).
+        int wheelDelta = mouse.ScrollWheelValue - _prevMouse.ScrollWheelValue;
+        if (wheelDelta != 0 && _state.Mode == PlacementMode.Tower
+            && (_state.SelectedTower == TowerType.Mortar || _state.SelectedTower == TowerType.Artillery))
+        {
+            int ticks = wheelDelta / 120;
+            if (ticks != 0)
+            {
+                _pendingConeAimOffset += ticks * (MathF.PI / 2f);
+                while (_pendingConeAimOffset > MathF.PI) _pendingConeAimOffset -= MathF.Tau;
+                while (_pendingConeAimOffset < -MathF.PI) _pendingConeAimOffset += MathF.Tau;
+                AudioManager.Instance.Play("ui_click", 0.3f);
+            }
+        }
+
         if (!_contextMenu.IsOpen) foreach (var btn in _toolbar) if (btn.Hotkey.HasValue && JustPressed(kb, btn.Hotkey.Value)) btn.OnClick();
         if (JustPressed(kb, Keys.R)) { StartGame(_seeds.CurrentSeed, _state.Difficulty); return; }
         if (lc && _contextMenu.IsOpen) { _contextMenu.HandleClick(mouse.X, mouse.Y); return; }
         if ((lc || rc) && _contextMenu.IsOpen) { _contextMenu.Close(); if (lc) return; }
-        if (lc) foreach (var btn in _toolbar) if (btn.Bounds.Contains(mouse.X, mouse.Y)) { btn.OnClick(); return; }
+
+        // Dropdown click handling (Grouped style)
+        if (_openDropdown != null)
+        {
+            if (lc)
+            {
+                foreach (var item in _openDropdown)
+                    if (item.Bounds.Contains(mouse.X, mouse.Y)) { item.OnClick(); return; }
+                // Clicking outside the dropdown and outside the anchor closes it.
+                if (!_openDropdownBounds.Contains(mouse.X, mouse.Y)
+                    && (_openDropdownAnchor == null || !_openDropdownAnchor.Bounds.Contains(mouse.X, mouse.Y)))
+                { CloseDropdown(); }
+            }
+        }
+
+        // Drag handling (Custom style)
+        if (_toolbarPrefs.Style == ToolbarStyle.Custom)
+        {
+            if (lc)
+            {
+                foreach (var btn in _toolbar)
+                {
+                    if (!btn.TowerType.HasValue) continue;
+                    if (!btn.Bounds.Contains(mouse.X, mouse.Y)) continue;
+                    _dragCandidate = btn; _dragStart = new Point(mouse.X, mouse.Y); _dragActive = false;
+                    break;
+                }
+            }
+            else if (ld && _dragCandidate != null)
+            {
+                int dx = mouse.X - _dragStart.X, dy = mouse.Y - _dragStart.Y;
+                if (!_dragActive && dx * dx + dy * dy > 64) _dragActive = true;
+            }
+            else if (lr && _dragCandidate != null)
+            {
+                if (_dragActive)
+                {
+                    ToolbarButton? target = null;
+                    foreach (var btn in _toolbar)
+                    {
+                        if (!btn.TowerType.HasValue || ReferenceEquals(btn, _dragCandidate)) continue;
+                        if (btn.Bounds.Contains(mouse.X, mouse.Y)) { target = btn; break; }
+                    }
+                    if (target != null) SwapTowerButtons(_dragCandidate, target);
+                    _dragCandidate = null; _dragActive = false;
+                    return; // consume the release so it doesn't also click
+                }
+                // No drag occurred: fall through to normal click handling below.
+                _dragCandidate = null; _dragActive = false;
+            }
+        }
+
+        if (lc) foreach (var btn in _toolbar) if (btn.Bounds.Width > 0 && btn.Bounds.Contains(mouse.X, mouse.Y)) { btn.OnClick(); return; }
         if (JustPressed(kb, Keys.Space)) _waves.RequestStart();
         _mouseWorld = new Vector2(mouse.X, mouse.Y);
         _hoverCell = Map.WorldToGrid(_mouseWorld);
@@ -417,6 +810,7 @@ public class Game1 : Game
                 int dx = _hoverCell.X - t.GridPos.X, dy = _hoverCell.Y - t.GridPos.Y;
                 if (dx >= 0 && dx < 2 && dy >= 0 && dy < 2) { _hoveredTower = t; break; }
             }
+            // Fence sits on a path cell — grid-cell match still works for hover.
             else if (t.GridPos == _hoverCell) { _hoveredTower = t; break; }
         }
         if (_hoveredTower == null)
@@ -438,17 +832,46 @@ public class Game1 : Game
     {
         if (!_map.IsInBounds(_hoverCell.X, _hoverCell.Y)) return;
         var cell = _map.Grid[_hoverCell.X, _hoverCell.Y]; var items = new List<ContextMenuItem>(); bool bw = !_waves.WaveActive;
-        // Zone-placed towers sit on CellType.Wall cells — use the hovered-tower reference to
-        // unlock the tower context menu regardless of the underlying cell type.
-        bool isTowerHovered = cell == CellType.Tower || (_hoveredTower != null && _hoveredTower.IsZonePlaced);
+        // Zone-placed towers sit on CellType.Wall cells, and ElectricFences sit on path
+        // (Empty) cells — use the hovered-tower reference to unlock the tower context menu
+        // regardless of the underlying cell type.
+        bool isTowerHovered = cell == CellType.Tower
+            || (_hoveredTower != null && (_hoveredTower.IsZonePlaced || _hoveredTower.IsPathPlaced));
         if (isTowerHovered && _hoveredTower != null)
         {
             var t = _hoveredTower;
             if (bw && t.PlacedDuringPrep) items.Add(new ContextMenuItem($"Remove (${t.FullRefundValue})", () => { RemoveTower(t, t.FullRefundValue); AudioManager.Instance.Play("ui_sell", 0.6f); }, Color.LightGreen));
             else items.Add(new ContextMenuItem($"Sell (${t.SellValue})", () => { RemoveTower(t, t.SellValue); AudioManager.Instance.Play("ui_sell", 0.6f); }, Color.Tomato));
-            if (t.CanUpgrade) { int cost = t.UpgradeCost; bool ca = _state.Money >= cost;
+            if (t.Type == TowerType.DroneController)
+            {
+                // Split upgrade — Range and Count are mutually exclusive. Once a track is
+                // picked, the other appears as a locked-out menu entry so the player can
+                // see why it disappeared rather than wondering.
+                int cost = t.UpgradeCost; bool ca = _state.Money >= cost;
+                bool rangeLocked = t.ChosenPath == UpgradePath.Count;
+                bool countLocked = t.ChosenPath == UpgradePath.Range;
+                bool rangeMax = !t.CanUpgradeRange && !rangeLocked;
+                bool countMax = !t.CanUpgradeCount && !countLocked;
+                string rangeLabel = rangeLocked ? "Range path locked"
+                    : rangeMax ? "Range maxed"
+                    : $"Upgrade Range (${cost}) Lv{t.Level + 1}";
+                string countLabel = countLocked ? "Count path locked"
+                    : countMax ? $"Max drones ({GameSettings.DroneControllerMaxDrones})"
+                    : $"+1 Drone (${cost})  [now {t.DroneCount}]";
+                bool rangeEnabled = !rangeLocked && !rangeMax && ca;
+                bool countEnabled = !countLocked && !countMax && ca;
+                items.Add(new ContextMenuItem(rangeLabel,
+                    () => { UpgradeTowerRange(t); AudioManager.Instance.Play("ui_upgrade", 0.6f); },
+                    rangeEnabled ? new Color(120, 180, 255) : new Color(60, 80, 120), rangeEnabled));
+                items.Add(new ContextMenuItem(countLabel,
+                    () => { UpgradeTowerCount(t); AudioManager.Instance.Play("ui_upgrade", 0.6f); },
+                    countEnabled ? new Color(160, 220, 120) : new Color(60, 100, 80), countEnabled));
+            }
+            else if (t.CanUpgrade) { int cost = t.UpgradeCost; bool ca = _state.Money >= cost;
                 string desc = t.Type switch { TowerType.Flame => $"Upgrade Lv{t.Level+1} (${cost}) +Burn", TowerType.Rocket => $"Upgrade Lv{t.Level+1} (${cost}) +Splash",
                     TowerType.Tesla => $"Upgrade Lv{t.Level+1} (${cost}) +Vuln", TowerType.Tachyon => $"Upgrade Lv{t.Level+1} (${cost}) +Slow",
+                    TowerType.Mortar or TowerType.Artillery => $"Upgrade Lv{t.Level+1} (${cost}) +Dmg +Splash",
+                    TowerType.ElectricFence => $"Recharge & Reinforce (${cost})",
                     TowerType.Repair => $"Upgrade Lv{t.Level+1} (${cost}) +Drone +Range", _ => $"Upgrade Lv{t.Level+1} (${cost})" };
                 items.Add(new ContextMenuItem(desc, () => { UpgradeTower(t); AudioManager.Instance.Play("ui_upgrade", 0.6f); }, ca ? Color.Gold : new Color(80, 60, 0), ca)); }
             else if (t.Type == TowerType.Grinder) items.Add(new ContextMenuItem("Not upgradeable", () => { }, Color.DimGray, false));
@@ -465,35 +888,109 @@ public class Game1 : Game
 
     private void RemoveTower(Tower t, int refund) { _state.Money += refund;
         // Zone-placed towers never marked the cell as Tower, so leave the wall untouched.
+        // Electric Fence lives on a path cell and never marked the grid either.
         if (t.Is2x2) _map.Remove2x2Tower(t.GridPos.X, t.GridPos.Y);
-        else if (!t.IsZonePlaced) _map.RemoveTower(t.GridPos.X, t.GridPos.Y);
-        RemoveDronesForTower(t); _towers.Remove(t); _hoveredTower = null; }
+        else if (!t.IsZonePlaced && t.Type != TowerType.ElectricFence) _map.RemoveTower(t.GridPos.X, t.GridPos.Y);
+        RemoveDronesForTower(t);
+        _attackDrones.RemoveAll(a => ReferenceEquals(a.GetHomeTower(), t));
+        _towers.Remove(t); _hoveredTower = null; }
     private void UpgradeTower(Tower t) { if (_state.Money < t.UpgradeCost) return; int db = t.DroneCount;
-        _state.Money -= t.UpgradeCost; t.Upgrade(); for (int i = db; i < t.DroneCount; i++) _drones.Add(new RepairDrone(t)); }
+        _state.Money -= t.UpgradeCost; t.Upgrade();
+        // Repair towers expand their drone fleet on upgrade; Drone Controllers grow theirs via UpgradeCount.
+        for (int i = db; i < t.DroneCount; i++)
+        { if (t.Type == TowerType.Repair) _drones.Add(new RepairDrone(t));
+          else if (t.Type == TowerType.DroneController) _attackDrones.Add(new AttackDrone(t, i, t.DroneCount)); } }
+
+    /// <summary>Drone Controller: extend per-drone attack range. Locks the upgrade path.</summary>
+    private void UpgradeTowerRange(Tower t)
+    {
+        if (!t.CanUpgradeRange || _state.Money < t.UpgradeCost) return;
+        _state.Money -= t.UpgradeCost;
+        t.UpgradeRange();
+    }
+
+    /// <summary>Drone Controller: add another drone. Locks the upgrade path.</summary>
+    private void UpgradeTowerCount(Tower t)
+    {
+        if (!t.CanUpgradeCount || _state.Money < t.UpgradeCost) return;
+        int db = t.DroneCount;
+        _state.Money -= t.UpgradeCost;
+        t.UpgradeCount();
+        for (int i = db; i < t.DroneCount; i++)
+            _attackDrones.Add(new AttackDrone(t, i, t.DroneCount));
+    }
     private void RemovePlayerWall(int c, int r) { if (_map.RemoveWall(c, r)) { _state.Walls++; NotifyEnemiesPathChanged(); } }
 
     private void TryPlaceTower()
     {
         if (!_state.CanAffordTower()) return;
-        if (_state.SelectedTower == TowerType.Repair)
+        var sel = _state.SelectedTower;
+        if (sel == TowerType.Repair)
         { // Repair is 2x2 — always block-mode, even when Zone is enabled. Zone placement doesn't
           // make sense for a structure that spans a 2x2 area.
           if (!_map.CanPlace2x2Tower(_hoverCell.X, _hoverCell.Y)) return; _state.SpendTower(); _map.Place2x2Tower(_hoverCell.X, _hoverCell.Y);
           AudioManager.Instance.Play("ui_click", 0.5f); var t = new Tower(_hoverCell.X, _hoverCell.Y, TowerType.Repair);
           if (_waves.WaveActive) t.PlacedDuringPrep = false; _towers.Add(t); _drones.Add(new RepairDrone(t)); _runStats.RecordTowerBuilt(); }
-        else if (_state.UsesZonePlacement)
+        else if (sel == TowerType.ElectricFence)
+        {
+            // Fence is placed on a path tile, not a wall. It must not block the only remaining
+            // path (it shouldn't anyway — it sits *on* the path).
+            if (!_map.CanPlaceFence(_hoverCell.X, _hoverCell.Y, _towers)) return;
+            _state.SpendTower();
+            AudioManager.Instance.Play("ui_click", 0.5f);
+            var t = new Tower(_hoverCell.X, _hoverCell.Y, TowerType.ElectricFence);
+            var pd = _map.GetPathDirectionAt(_hoverCell.X, _hoverCell.Y);
+            t.SetFacing(MathF.Atan2(pd.Y, pd.X));
+            if (_waves.WaveActive) t.PlacedDuringPrep = false;
+            _towers.Add(t); _runStats.RecordTowerBuilt();
+        }
+        else if (_state.UsesZonePlacement && sel != TowerType.DroneController)
         { if (!CanZonePlaceAt(_hoverCell, _mouseWorld)) return;
           _state.SpendTower();
           // Zone towers do NOT mark the grid cell as CellType.Tower — multiple zone towers may
           // coexist on the same wall cell, constrained only by the minimum-spacing rule.
           AudioManager.Instance.Play("ui_click", 0.5f);
-          var t = new Tower(_hoverCell.X, _hoverCell.Y, _state.SelectedTower, _mouseWorld);
-          if (_waves.WaveActive) t.PlacedDuringPrep = false; _towers.Add(t); _runStats.RecordTowerBuilt(); }
+          var t = new Tower(_hoverCell.X, _hoverCell.Y, sel, _mouseWorld);
+          if (sel == TowerType.Mortar || sel == TowerType.Artillery) { ConfigureConeFacing(t); _pendingConeAimOffset = 0f; }
+          if (_waves.WaveActive) t.PlacedDuringPrep = false;
+          _towers.Add(t); _runStats.RecordTowerBuilt(); }
         else
         { if (!_map.CanPlaceTower(_hoverCell.X, _hoverCell.Y)) return; _state.SpendTower(); _map.PlaceTower(_hoverCell.X, _hoverCell.Y);
-          AudioManager.Instance.Play("ui_click", 0.5f); var t = new Tower(_hoverCell.X, _hoverCell.Y, _state.SelectedTower);
+          AudioManager.Instance.Play("ui_click", 0.5f); var t = new Tower(_hoverCell.X, _hoverCell.Y, sel);
+          if (sel == TowerType.Mortar || sel == TowerType.Artillery) { ConfigureConeFacing(t); _pendingConeAimOffset = 0f; }
+          if (sel == TowerType.DroneController) { SyncAttackDronesFor(t); AudioManager.Instance.Play("tower_drone_launch", 0.55f); }
           if (_waves.WaveActive) t.PlacedDuringPrep = false; _towers.Add(t); _runStats.RecordTowerBuilt(); }
     }
+
+    /// <summary>Lock the cone-of-fire facing of a freshly-placed Mortar/Artillery tower
+    /// to the nearest path waypoint, plus any wheel-applied rotation offset. Cone towers
+    /// do not rotate after placement, so this is permanent.</summary>
+    private void ConfigureConeFacing(Tower t)
+    {
+        if (_map.CurrentPath.Count == 0) { t.SetFacing(_pendingConeAimOffset); return; }
+        Vector2 nearest = _map.CurrentPath[0]; float bd = float.MaxValue;
+        foreach (var wp in _map.CurrentPath)
+        { float d = Vector2.Distance(t.WorldPos, wp); if (d < bd) { bd = d; nearest = wp; } }
+        var diff = nearest - t.WorldPos;
+        float baseAngle = diff.LengthSquared() < 0.001f ? 0f : MathF.Atan2(diff.Y, diff.X);
+        t.SetFacing(baseAngle + _pendingConeAimOffset);
+    }
+
+    /// <summary>Refresh the attack-drone roster for a Drone Controller so it matches the
+    /// tower's current DroneCount. Called on placement and after each Count upgrade.</summary>
+    private void SyncAttackDronesFor(Tower controller)
+    {
+        if (controller.Type != TowerType.DroneController) return;
+        int current = 0;
+        foreach (var d in _attackDrones)
+            if (ReferenceEquals(GetAttackDroneHome(d), controller)) current++;
+        for (int i = current; i < controller.DroneCount; i++)
+            _attackDrones.Add(new AttackDrone(controller, i, controller.DroneCount));
+    }
+
+    /// <summary>Reflection-free home-tower lookup. We don't expose the field publicly to
+    /// avoid leaking the orbit slot index, so we round-trip through a small helper.</summary>
+    private static Tower? GetAttackDroneHome(AttackDrone d) => d.GetHomeTower();
 
     /// <summary>Zone-mode placement check: cursor must be over a wall cell (not path/spawn/exit
     /// or a block-mode tower), and must be at least <see cref="GameSettings.ZoneMinTowerSpacing"/>
@@ -545,9 +1042,19 @@ public class Game1 : Game
     }
 
     private void UpdateTowers(GameTime gt) { float dt = (float)gt.ElapsedGameTime.TotalSeconds;
-        foreach (var t in _towers) { t.Update(gt, _enemies, _projectiles, _flames); t.UpdatePassiveHeal(dt, _towers); } }
-    private void UpdateDrones(GameTime gt) { foreach (var d in _drones) d.Update(gt, _towers, _state); }
-    private void UpdateProjectiles(GameTime gt) { foreach (var p in _projectiles) p.Update(gt); }
+        foreach (var t in _towers)
+        {
+            t.Update(gt, _enemies, _projectiles, _flames);
+            if (t.IsConeTower) t.UpdateCone(gt, _enemies, _shells);
+            if (t.Type == TowerType.ElectricFence) t.UpdateFence(gt, _enemies);
+            t.UpdatePassiveHeal(dt, _towers);
+        } }
+    private void UpdateDrones(GameTime gt)
+    {
+        foreach (var d in _drones) d.Update(gt, _towers, _state);
+        foreach (var a in _attackDrones) a.Update(gt, _enemies);
+    }
+    private void UpdateProjectiles(GameTime gt) { foreach (var p in _projectiles) p.Update(gt); foreach (var s in _shells) s.Update(gt); }
     private void UpdateFlames(GameTime gt) { foreach (var f in _flames) f.Update(gt, _enemies); }
 
     private void CleanUp()
@@ -585,6 +1092,9 @@ public class Game1 : Game
             if (t.Type == TowerType.Repair) rebuildDr = true; _towers.RemoveAt(i); if (_hoveredTower == t) _hoveredTower = null; } }
         if (rebuildDr) { _drones.Clear(); foreach (var t in _towers) if (t.Type == TowerType.Repair) for (int d = 0; d < t.DroneCount; d++) _drones.Add(new RepairDrone(t)); }
         _projectiles.RemoveAll(p => !p.IsActive); _flames.RemoveAll(f => !f.IsAlive);
+        _shells.RemoveAll(s => !s.IsActive);
+        // Drop attack drones whose home tower is gone.
+        _attackDrones.RemoveAll(a => { var h = a.GetHomeTower(); return h == null || h.IsDestroyed || !_towers.Contains(h); });
     }
 
     // ---- DRAW ----
@@ -617,7 +1127,7 @@ public class Game1 : Game
             DrawCentred($"{star}Seed {fav.Seed}  |  Best: {fav.BestScore} pts  Wave {fav.BestWave}", cx, y, Color.LightGray); y += 24; if (y > 640) break; } }
         if (_leaderboard.Career.TotalGamesPlayed > 0)
         { var c = _leaderboard.Career; DrawCentred($"Career: {c.TotalGamesPlayed} games  {c.TotalKills} kills  Best wave {c.HighestWave}  Best score {c.HighestScore}", cx, GameSettings.ScreenHeight - 60, Color.DimGray); }
-        DrawCentred("1-9: Towers | W: Wall | Z: Block/Zone | +/-: Speed | R-Click: Sell/Upgrade | SPACE: Wave | M: Mute", cx, GameSettings.ScreenHeight - 30, Color.DimGray);
+        DrawCentred("1-9/0/A/D/E: Towers | W: Wall | Z: Block/Zone | +/-: Speed | R-Click: Sell/Upgrade | SPACE: Wave | M: Mute", cx, GameSettings.ScreenHeight - 30, Color.DimGray);
     }
 
     private void DrawSettings()
@@ -633,6 +1143,37 @@ public class Game1 : Game
             _spriteBatch.Draw(_sprites.Pixel, r, sel ? dc[i] * 0.4f : new Color(40, 40, 60));
             DrawCentred(diffs[i], r.X + r.Width / 2f, r.Y + 6, sel ? dc[i] : (canChangeDiff ? Color.Gray : Color.DimGray)); }
         y += 50;
+        // Toolbar style picker
+        _spriteBatch.DrawString(_font, "Toolbar Layout:", new Vector2(panelX, y), Color.White);
+        y += 30;
+        string[] styleNames = { "Compact", "Grouped", "Two-Row", "Custom" };
+        Color[] styleColors = { new Color(160, 200, 240), new Color(220, 200, 80), new Color(160, 220, 160), new Color(255, 140, 80) };
+        int sbw = 95;
+        for (int i = 0; i < 4; i++)
+        {
+            var r = new Rectangle(panelX + i * (sbw + 5), y, sbw, 30);
+            bool sel = (int)_toolbarPrefs.Style == i;
+            _spriteBatch.Draw(_sprites.Pixel, r, sel ? styleColors[i] * 0.4f : new Color(40, 40, 60));
+            DrawCentred(styleNames[i], r.X + r.Width / 2f, r.Y + 6, sel ? styleColors[i] : Color.Gray);
+        }
+        y += 36;
+        string styleDesc = _toolbarPrefs.Style switch
+        {
+            ToolbarStyle.Compact  => "Single row of compact buttons (default).",
+            ToolbarStyle.Grouped  => "Category buttons open dropdown menus.",
+            ToolbarStyle.TwoRow   => "Two rows — projectiles up top, utility below.",
+            ToolbarStyle.Custom   => "Click-drag tower buttons to reorder. Saved automatically.",
+            _ => ""
+        };
+        _spriteBatch.DrawString(_font, styleDesc, new Vector2(panelX, y), Color.DimGray);
+        if (_toolbarPrefs.Style == ToolbarStyle.Custom)
+        {
+            var resetR = new Rectangle(panelX, y + 18, 200, 24);
+            _spriteBatch.Draw(_sprites.Pixel, resetR, new Color(60, 40, 80));
+            DrawCentred("Reset to Default Order", resetR.X + resetR.Width / 2f, resetR.Y + 4, new Color(220, 180, 255));
+        }
+        y += 34;
+
         _spriteBatch.DrawString(_font, $"SFX Volume: {(int)(AudioManager.Instance.SfxVolume * 100)}%", new Vector2(panelX, y), Color.White); y += 30;
         DrawSlider(panelX, y, panelW, 20, AudioManager.Instance.SfxVolume, new Color(100, 180, 255)); y += 40;
         _spriteBatch.DrawString(_font, $"Music Volume: {(int)(AudioManager.Instance.MusicVolume * 100)}%", new Vector2(panelX, y), Color.White); y += 30;
@@ -678,6 +1219,15 @@ public class Game1 : Game
     private void DrawPlacementGhost()
     {
         if (!_map.IsInBounds(_hoverCell.X, _hoverCell.Y) || _contextMenu.IsOpen) return;
+        if (_state.Mode == PlacementMode.Tower && _state.SelectedTower == TowerType.ElectricFence)
+        {
+            var pos = Map.GridToWorld(_hoverCell.X, _hoverCell.Y); int size = GameSettings.CellSize - 4;
+            var rect = new Rectangle((int)(pos.X - size / 2f), (int)(pos.Y - size / 2f), size, size);
+            bool ok = _map.CanPlaceFence(_hoverCell.X, _hoverCell.Y, _towers) && _state.CanAffordTower();
+            _spriteBatch.Draw(_sprites.Pixel, rect, (ok ? new Color(255, 220, 80) : Color.Red) * 0.2f);
+            if (ok) _spriteBatch.Draw(_sprites.Towers[TowerType.ElectricFence], rect, Color.White * 0.5f);
+            return;
+        }
         if (_state.Mode == PlacementMode.Tower && _state.SelectedTower == TowerType.Repair)
         { bool canPlace = _map.CanPlace2x2Tower(_hoverCell.X, _hoverCell.Y) && _state.CanAffordTower();
           for (int dx = 0; dx < 2; dx++) for (int dy = 0; dy < 2; dy++)
@@ -710,7 +1260,12 @@ public class Game1 : Game
           { if (_map.IsInBounds(_hoverCell.X, _hoverCell.Y) && _map.Grid[_hoverCell.X, _hoverCell.Y] != CellType.Wall) return;
             _spriteBatch.Draw(_sprites.Pixel, rect, Color.Red * 0.2f); return; }
           _spriteBatch.Draw(_sprites.Towers[_state.SelectedTower], rect, Color.White * 0.5f);
-          new Tower(_hoverCell.X, _hoverCell.Y, _state.SelectedTower).DrawRange(_spriteBatch, _sprites.Ring); }
+          var ghost = new Tower(_hoverCell.X, _hoverCell.Y, _state.SelectedTower);
+          if (_state.SelectedTower == TowerType.Mortar || _state.SelectedTower == TowerType.Artillery)
+              ConfigureConeFacing(ghost);
+          ghost.DrawRange(_spriteBatch, _sprites.Ring);
+          if (ghost.IsConeTower) ghost.DrawConeOverlay(_spriteBatch, _sprites.Pixel,
+              _state.SelectedTower == TowerType.Mortar ? new Color(150, 120, 90) : new Color(180, 140, 60), 0.22f); }
         else if (_state.Mode == PlacementMode.Wall)
         { var pos = Map.GridToWorld(_hoverCell.X, _hoverCell.Y); int size = GameSettings.CellSize - 4;
           var rect = new Rectangle((int)(pos.X - size / 2f), (int)(pos.Y - size / 2f), size, size);
@@ -722,10 +1277,22 @@ public class Game1 : Game
           _spriteBatch.Draw(_sprites.TileWall, rect, Color.White * 0.5f); }
     }
 
-    private void DrawTowers() { foreach (var t in _towers) { t.Draw(_spriteBatch, _sprites, t == _hoveredTower); if (t == _hoveredTower) t.DrawRange(_spriteBatch, _sprites.Ring); } }
-    private void DrawDrones() { foreach (var d in _drones) d.Draw(_spriteBatch, _sprites); }
+    private void DrawTowers() { foreach (var t in _towers)
+        {
+            t.Draw(_spriteBatch, _sprites, t == _hoveredTower);
+            // Cone-of-fire wedge: faint when not hovered, brighter on hover.
+            if (t.IsConeTower)
+            {
+                Color rc = t.Type == TowerType.Mortar ? new Color(150, 120, 90) : new Color(180, 140, 60);
+                t.DrawConeOverlay(_spriteBatch, _sprites.Pixel, rc, t == _hoveredTower ? 0.22f : 0.10f);
+            }
+            if (t == _hoveredTower) t.DrawRange(_spriteBatch, _sprites.Ring);
+        } }
+    private void DrawDrones() { foreach (var d in _drones) d.Draw(_spriteBatch, _sprites);
+        foreach (var a in _attackDrones) a.Draw(_spriteBatch, _sprites); }
     private void DrawEnemies() { foreach (var e in _enemies) e.Draw(_spriteBatch, _sprites.Pixel); }
-    private void DrawProjectiles() { foreach (var p in _projectiles) p.Draw(_spriteBatch, _sprites); }
+    private void DrawProjectiles() { foreach (var p in _projectiles) p.Draw(_spriteBatch, _sprites);
+        foreach (var s in _shells) s.Draw(_spriteBatch, _sprites); }
     private void DrawFlames() { foreach (var f in _flames) f.Draw(_spriteBatch, _sprites.Pixel); }
 
     private void DrawHUD()
@@ -749,7 +1316,36 @@ public class Game1 : Game
         var ws = _font.MeasureString(wave); _spriteBatch.DrawString(_font, wave, new Vector2((GameSettings.ScreenWidth - ws.X) / 2f, 26), Color.CornflowerBlue);
     }
 
-    private void DrawToolbar() { foreach (var btn in _toolbar) btn.Draw(_spriteBatch, _sprites.Pixel, _font); }
+    private void DrawToolbar()
+    {
+        foreach (var btn in _toolbar)
+            if (btn.Bounds.Width > 0) btn.Draw(_spriteBatch, _sprites.Pixel, _font);
+
+        // Dropdown panel (Grouped style)
+        if (_openDropdown != null)
+        {
+            _spriteBatch.Draw(_sprites.Pixel, _openDropdownBounds, new Color(25, 25, 45));
+            int b = 1;
+            var rb = _openDropdownBounds;
+            _spriteBatch.Draw(_sprites.Pixel, new Rectangle(rb.X, rb.Y, rb.Width, b), new Color(120, 120, 160));
+            _spriteBatch.Draw(_sprites.Pixel, new Rectangle(rb.X, rb.Bottom - b, rb.Width, b), new Color(120, 120, 160));
+            _spriteBatch.Draw(_sprites.Pixel, new Rectangle(rb.X, rb.Y, b, rb.Height), new Color(120, 120, 160));
+            _spriteBatch.Draw(_sprites.Pixel, new Rectangle(rb.Right - b, rb.Y, b, rb.Height), new Color(120, 120, 160));
+            foreach (var item in _openDropdown) item.Draw(_spriteBatch, _sprites.Pixel, _font);
+        }
+
+        // Drag preview (Custom style)
+        if (_toolbarPrefs.Style == ToolbarStyle.Custom && _dragActive && _dragCandidate != null)
+        {
+            var ms = Mouse.GetState();
+            var srcRect = _dragCandidate.Bounds;
+            var ghost = new Rectangle(ms.X - srcRect.Width / 2, ms.Y - srcRect.Height / 2, srcRect.Width, srcRect.Height);
+            _spriteBatch.Draw(_sprites.Pixel, ghost, _dragCandidate.Accent * 0.5f);
+            var lbl = _dragCandidate.Label;
+            var ts = _font.MeasureString(lbl);
+            _spriteBatch.DrawString(_font, lbl, new Vector2(ghost.X + (ghost.Width - ts.X) / 2f, ghost.Y + (ghost.Height - ts.Y) / 2f), Color.White);
+        }
+    }
 
     private void DrawGlossary()
     {

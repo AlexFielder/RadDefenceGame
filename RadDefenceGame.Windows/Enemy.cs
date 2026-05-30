@@ -53,6 +53,16 @@ public class Enemy
     public int CurrentWaypoint => _currentWaypoint;
     public List<Vector2> Path => _path;
 
+    // -- shield (applied as a damage buffer in front of HP; primarily used for the
+    // Shielded enemy type and as the target of Electric Fence damage)
+    public float Shield { get; set; }
+    public float MaxShield { get; private set; }
+
+    // -- block-by-fence (set by ElectricFence each frame; when > 0 the enemy stops moving)
+    public float BlockTimer { get; private set; }
+    public bool IsBlocked => BlockTimer > 0f;
+    public void Block(float duration) { if (duration > BlockTimer) BlockTimer = duration; }
+
     public Enemy(List<Vector2> path, float health, float speed, int reward,
         Texture2D sprite, EnemyType type)
     {
@@ -66,6 +76,11 @@ public class Enemy
         Type = type;
         AbilityCooldown = 0f;
         _teleportTimer = GameSettings.TeleportCooldown;
+        if (type == EnemyType.Shielded)
+        {
+            MaxShield = health * GameSettings.ShieldedEnemyShieldRatio;
+            Shield = MaxShield;
+        }
     }
 
     public void UpdatePath(List<Vector2> newPath)
@@ -84,16 +99,54 @@ public class Enemy
     public void TakeDamage(float damage, TowerType source)
     {
         float actual = damage * VulnerabilityMultiplier;
-        Health -= actual;
         LastDamageSource = source;
+        // shield absorbs damage first; spill-over hits health.
+        if (Shield > 0f)
+        {
+            float pre = Shield;
+            if (actual <= Shield) { Shield -= actual; MaybeShieldHitSound(pre, actual); return; }
+            actual -= Shield; MaybeShieldHitSound(pre, pre); Shield = 0f;
+        }
+        Health -= actual;
         if (Health <= 0f) { Health = 0f; IsAlive = false; }
     }
 
     public void TakeRawDamage(float damage, TowerType source)
     {
-        Health -= damage;
         LastDamageSource = source;
+        if (Shield > 0f)
+        {
+            float pre = Shield;
+            if (damage <= Shield) { Shield -= damage; MaybeShieldHitSound(pre, damage); return; }
+            damage -= Shield; MaybeShieldHitSound(pre, pre); Shield = 0f;
+        }
+        Health -= damage;
         if (Health <= 0f) { Health = 0f; IsAlive = false; }
+    }
+
+    /// <summary>Damage applied specifically to the shield layer, used by the Electric Fence.
+    /// Spills over into HP only after the shield is fully depleted. Bypasses Tesla
+    /// vulnerability since the fence is a contact-DOT effect.</summary>
+    public void TakeShieldDamage(float damage, TowerType source)
+    {
+        LastDamageSource = source;
+        if (Shield > 0f)
+        {
+            float pre = Shield;
+            if (damage <= Shield) { Shield -= damage; MaybeShieldHitSound(pre, damage); return; }
+            damage -= Shield; MaybeShieldHitSound(pre, pre); Shield = 0f;
+        }
+        Health -= damage;
+        if (Health <= 0f) { Health = 0f; IsAlive = false; }
+    }
+
+    /// <summary>Audio cue when an attack lands on the shield (rather than HP). Throttled
+    /// by AudioManager's per-sound cooldown so swarms don't machine-gun the effect, and
+    /// gated by a minimum damage threshold so DOT ticks don't spam.</summary>
+    private void MaybeShieldHitSound(float shieldBefore, float absorbed)
+    {
+        if (absorbed < 2f) return;
+        AudioManager.Instance.PlayVaried("shield_hit", 0.4f, 0.12f, 0.05f);
     }
 
     /// <summary>Heal this enemy (used by Medic). Cannot exceed max health.</summary>
@@ -149,6 +202,15 @@ public class Enemy
 
         // tick ability cooldown (used by Game1 for medic/hacker/blaster)
         if (AbilityCooldown > 0f) AbilityCooldown -= dt;
+
+        // tick block-timer (set by Electric Fence each frame the enemy is held against it).
+        // If held, skip movement so the enemy stays pinned at the fence until it breaks.
+        if (BlockTimer > 0f)
+        {
+            BlockTimer -= dt;
+            if (BlockTimer > 0f) return;
+            BlockTimer = 0f;
+        }
 
         // teleporter: blink forward along path
         if (Type == EnemyType.Teleporter)
@@ -211,6 +273,23 @@ public class Enemy
         int by = (int)(Position.Y - size / 2f - 8);
         sb.Draw(pixel, new Rectangle(bx, by, barW, barH), new Color(60, 0, 0));
         sb.Draw(pixel, new Rectangle(bx, by, (int)(barW * hp), barH), Color.Lime);
+
+        // shield bar (sits above the health bar when the enemy has shield capacity)
+        if (MaxShield > 0f)
+        {
+            int sby = by - (barH + 1);
+            sb.Draw(pixel, new Rectangle(bx, sby, barW, barH), new Color(0, 20, 60));
+            float sf = MathF.Max(0f, Shield / MaxShield);
+            sb.Draw(pixel, new Rectangle(bx, sby, (int)(barW * sf), barH), new Color(120, 200, 255));
+        }
+
+        // block indicator (enemy held by an Electric Fence)
+        if (IsBlocked)
+        {
+            int s = 6;
+            sb.Draw(pixel, new Rectangle((int)Position.X - s / 2, by - 14, s, s),
+                new Color(255, 240, 80));
+        }
 
         // debuff indicators
         int indicatorY = by + barH + 1;

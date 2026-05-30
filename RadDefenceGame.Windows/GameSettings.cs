@@ -40,6 +40,10 @@ public static class GameSettings
     public const int TachyonTowerCost = 100;
     public const int GrinderTowerCost = 200;
     public const int RepairTowerCost = 300;
+    public const int MortarTowerCost = 175;
+    public const int ArtilleryTowerCost = 250;
+    public const int DroneControllerCost = 220;
+    public const int ElectricFenceCost = 100;
 
     // Selling
     public const float SellRefundRatio = 0.5f;
@@ -79,6 +83,42 @@ public static class GameSettings
     public const float MaxTowerHealth = 200f;
     public const float RepairUpgradeCostMultiplier = 3f;
     public const float AutoRebuildCostMultiplier = 5f;
+
+    // Mortar / Artillery (cone-of-fire, fixed facing, arcing shells)
+    // Cone half-angle is radians on either side of the facing direction.
+    public const float MortarRange = 200f;
+    public const float MortarDamage = 40f;
+    public const float MortarFireRate = 0.7f;
+    public const float MortarSplashRadius = 60f;
+    public const float MortarConeHalfAngle = 0.7f;        // ~40°
+    public const float ArtilleryRange = 350f;
+    public const float ArtilleryDamage = 100f;
+    public const float ArtilleryFireRate = 0.25f;
+    public const float ArtillerySplashRadius = 80f;
+    public const float ArtilleryConeHalfAngle = 0.5f;     // ~28°
+    public const float MortarShellSpeed = 260f;
+    public const float ArtilleryShellSpeed = 300f;
+
+    // Drone Controller — spawns attack drones that orbit the controller and dive on enemies
+    public const float DroneControllerRange = 180f;
+    public const int DroneControllerStartDrones = 1;
+    public const int DroneControllerMaxDrones = 5;
+    public const int DroneControllerMaxRangeUpgrades = 4;
+    public const float AttackDroneSpeed = 220f;
+    public const float AttackDroneDamage = 18f;
+    public const float AttackDroneFireRate = 1.4f;
+    public const float AttackDroneOrbitRadius = 28f;
+
+    // Electric Fence — path-placed, takes DOT, blocks enemies, damages shields
+    public const float ElectricFenceHealth = 160f;
+    public const float ElectricFenceSelfDecayDps = 6f;     // dissipation when no enemies on it
+    public const float ElectricFenceContactDecayDps = 18f; // additional decay per enemy in contact
+    public const float ElectricFenceShieldDps = 25f;       // damage applied to enemy shields/HP while held
+    public const float ElectricFenceBlockRadius = 18f;
+    public const float ElectricFenceMaxLevel = 3;
+
+    // Enemy shields — used by Shielded enemies and Electric Fence interaction
+    public const float ShieldedEnemyShieldRatio = 0.6f;    // 60% of MaxHealth as shield
 
     // Wall grants per wave
     public const int WallGrantMin = 1;

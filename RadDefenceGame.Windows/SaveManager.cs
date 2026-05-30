@@ -20,10 +20,13 @@ public static class SaveManager
     };
 
     // Zone fields default to 0/false so older saves deserialize cleanly as block-mode towers.
+    // ChosenPath/RangeUpgrades persist Drone Controller upgrade-track state; default values
+    // (None / 0) load cleanly for all other tower types.
     public record TowerRecord(
         int Type, int Col, int Row, int Level, int TotalInvested,
         float TowerHealth, bool AutoRebuildEnabled,
-        bool IsZonePlaced = false, float WorldPosX = 0f, float WorldPosY = 0f);
+        bool IsZonePlaced = false, float WorldPosX = 0f, float WorldPosY = 0f,
+        int ChosenPath = 0, int RangeUpgrades = 0, float ConeFacing = 0f);
 
     // PlacementSystem defaults to 0 (Block) so older saves load correctly.
     public record SaveData(
@@ -42,7 +45,8 @@ public static class SaveManager
             towerRecords.Add(new TowerRecord(
                 (int)t.Type, t.GridPos.X, t.GridPos.Y, t.Level,
                 t.TotalInvested, t.TowerHealth, t.AutoRebuildEnabled,
-                t.IsZonePlaced, t.WorldPos.X, t.WorldPos.Y));
+                t.IsZonePlaced, t.WorldPos.X, t.WorldPos.Y,
+                (int)t.ChosenPath, t.RangeUpgradesApplied, t.ConeFacing));
 
         var playerWalls = new List<int[]>();
         foreach (var pt in map.PlayerPlacedWalls)

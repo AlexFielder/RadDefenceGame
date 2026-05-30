@@ -7,17 +7,24 @@ using System;
 
 public class ToolbarButton
 {
-    public Rectangle Bounds { get; }
+    public Rectangle Bounds { get; set; }
     public string Label { get; private set; }
     public Keys? Hotkey { get; }
     public Action OnClick { get; }
     public Color Accent { get; }
 
+    /// <summary>The tower type this button represents, if any. Used by the Custom
+    /// (draggable) layout to identify which buttons can be reordered and by the
+    /// Grouped (dropdown) layout to identify which towers each dropdown contains.
+    /// Null for non-tower buttons (Wall, Speed, Mute, etc.).</summary>
+    public TowerType? TowerType { get; }
+
     private readonly Func<bool> _isSelected;
     private readonly Func<bool> _isEnabled;
 
     public ToolbarButton(Rectangle bounds, string label, Keys? hotkey,
-        Action onClick, Func<bool> isSelected, Func<bool> isEnabled, Color accent)
+        Action onClick, Func<bool> isSelected, Func<bool> isEnabled, Color accent,
+        TowerType? towerType = null)
     {
         Bounds = bounds;
         Label = label;
@@ -26,9 +33,11 @@ public class ToolbarButton
         Accent = accent;
         _isSelected = isSelected;
         _isEnabled = isEnabled;
+        TowerType = towerType;
     }
 
     public void SetLabel(string label) => Label = label;
+    public void SetBounds(Rectangle r) => Bounds = r;
 
     public void Draw(SpriteBatch sb, Texture2D pixel, SpriteFont font)
     {

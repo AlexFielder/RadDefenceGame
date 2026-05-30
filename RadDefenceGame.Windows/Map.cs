@@ -125,6 +125,47 @@ public class Map
         return Grid[col, row] == CellType.Wall;
     }
 
+    /// <summary>True if the given cell lies on the current enemy path (i.e. an empty cell
+    /// the path traverses). Used by Electric Fence placement.</summary>
+    public bool IsCellOnPath(int col, int row)
+    {
+        if (!IsInBounds(col, row)) return false;
+        // Spawn / exit aren't valid fence spots; only "internal" path tiles.
+        var wp = GridToWorld(col, row);
+        // CurrentPath is a list of world-space waypoints corresponding to path cells.
+        foreach (var p in CurrentPath)
+            if (p == wp) return true;
+        return false;
+    }
+
+    /// <summary>Path-tile placement check for the Electric Fence: must be an Empty cell on
+    /// the path, not a spawn/exit, not already occupied by another path tower.</summary>
+    public bool CanPlaceFence(int col, int row, IEnumerable<Tower> existingTowers)
+    {
+        if (!IsCellOnPath(col, row)) return false;
+        if (Grid[col, row] != CellType.Empty) return false;
+        foreach (var t in existingTowers)
+            if (t.IsPathPlaced && t.GridPos.X == col && t.GridPos.Y == row) return false;
+        return true;
+    }
+
+    /// <summary>Returns a unit vector along the path at the given cell (used to orient
+    /// path-placed towers like the Electric Fence). Falls back to +X if the path
+    /// direction can't be determined.</summary>
+    public Vector2 GetPathDirectionAt(int col, int row)
+    {
+        var wp = GridToWorld(col, row);
+        for (int i = 0; i < CurrentPath.Count; i++)
+        {
+            if (CurrentPath[i] != wp) continue;
+            Vector2 next = i + 1 < CurrentPath.Count ? CurrentPath[i + 1] : CurrentPath[i];
+            Vector2 prev = i > 0 ? CurrentPath[i - 1] : CurrentPath[i];
+            var dir = next - prev;
+            if (dir.LengthSquared() > 0.001f) { dir.Normalize(); return dir; }
+        }
+        return new Vector2(1, 0);
+    }
+
     public bool CanPlace2x2Tower(int col, int row)
     {
         for (int dx = 0; dx < 2; dx++)

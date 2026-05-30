@@ -119,6 +119,8 @@ public class RepairDrone
         foreach (var t in towers)
         {
             if (t == _home || t.IsDestroyed) continue;
+            // Electric Fences are explicitly not repairable — they're meant to decay.
+            if (t.Type == TowerType.ElectricFence) continue;
             float dist = Vector2.Distance(_home.WorldPos, t.WorldPos);
             if (dist > GameSettings.RepairDroneRange) continue;
 

@@ -14,6 +14,7 @@ public class SpriteSet
     public Dictionary<TowerType, Texture2D> Projectiles { get; } = new();
 
     public Texture2D DroneRepair { get; }
+    public Texture2D DroneAttack { get; }
     public Texture2D TileWall { get; }
     public Texture2D TilePath { get; }
     public Texture2D Pixel { get; }
@@ -48,8 +49,13 @@ public class SpriteSet
         Towers[TowerType.Tachyon] = content.Load<Texture2D>("Images/tower_tachyon_warp");
         Towers[TowerType.Grinder] = content.Load<Texture2D>("Images/tower_parts_grinder");
         Towers[TowerType.Repair]  = content.Load<Texture2D>("Images/tower_repair");
+        Towers[TowerType.Mortar]          = content.Load<Texture2D>("Images/tower_mortar");
+        Towers[TowerType.Artillery]       = content.Load<Texture2D>("Images/tower_artillery");
+        Towers[TowerType.DroneController] = content.Load<Texture2D>("Images/tower_drone_controller");
+        Towers[TowerType.ElectricFence]   = content.Load<Texture2D>("Images/tower_electric_fence");
 
         DroneRepair = content.Load<Texture2D>("Images/drone_repair");
+        DroneAttack = content.Load<Texture2D>("Images/drone_attack");
 
         Projectiles[TowerType.Basic]  = content.Load<Texture2D>("Images/proj_bullet");
         Projectiles[TowerType.Sniper] = content.Load<Texture2D>("Images/proj_sniper");
