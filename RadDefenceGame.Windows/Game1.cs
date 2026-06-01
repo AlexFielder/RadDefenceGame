@@ -79,6 +79,14 @@ public class Game1 : Game
 
     private int _glossaryIndex;
     private GameScreen _glossaryReturnScreen;
+
+    // Save-progress confirmation popup. Shown briefly after a successful save so the
+    // player gets visible feedback (the click sound alone was easy to miss). The popup
+    // sits centred over the pause screen, auto-dismisses after a few seconds, and can
+    // be dismissed early by clicking anywhere.
+    private const float SaveConfirmDuration = 3.5f;
+    private float _saveConfirmTimer;
+    private string _saveConfirmText = "";
     private static readonly EnemyType[] GlossaryOrder = (EnemyType[])Enum.GetValues(typeof(EnemyType));
 
     public Game1()
@@ -126,6 +134,7 @@ public class Game1 : Game
         _contextMenu.Close(); _screen = GameScreen.Playing;
         _seedInput = ""; _seedInputActive = false;
         _gameOverSoundPlayed = false; _paused = false; _lastRank = 0;
+        _saveConfirmTimer = 0f; _saveConfirmText = "";
         _runStats = new GameStats { Seed = seed }; BuildToolbar();
     }
 
@@ -192,6 +201,10 @@ public class Game1 : Game
         if (_waves.WaveActive) return;
         SaveManager.Save(_seeds.CurrentSeed, _waves.CurrentWave, _state, _towers, _map, _runStats.PlayTimeSeconds);
         AudioManager.Instance.Play("ui_click", 0.6f);
+        // Visible confirmation: tells the player which seed and wave were saved so
+        // they can compare against the title-screen Load slot later. Auto-dismisses.
+        _saveConfirmText = $"Saved seed {_seeds.CurrentSeed} (wave {_waves.CurrentWave})";
+        _saveConfirmTimer = SaveConfirmDuration;
     }
 
     private void QuitToMenu() { _paused = false; _contextMenu.Close(); _seeds.NewRandomSeed(); _screen = GameScreen.Title; }
@@ -404,8 +417,10 @@ public class Game1 : Game
         int y = 44;
         int rx = GameSettings.ScreenWidth - 10;
         _speedButton = new ToolbarButton(new Rectangle(rx - 90, y, 90, 28), $"Spd {_state.SpeedLabel}", null,
-            () => { _state.CycleSpeed(); UpdateSpeedLabel(); AudioManager.Instance.Play("ui_click", 0.4f); },
-            () => !_state.IsNormalSpeed, () => true, Color.Yellow);
+            () => { _state.SpeedUp(); UpdateSpeedLabel(); AudioManager.Instance.Play("ui_click", 0.4f); },
+            () => !_state.IsNormalSpeed, () => true, Color.Yellow,
+            onRightClick: () => { _state.SlowDown(); UpdateSpeedLabel(); AudioManager.Instance.Play("ui_click", 0.4f); },
+            tooltip: "Left-click / +: faster   Right-click / -: slower");
         _toolbar.Add(_speedButton); rx -= 93;
         _autoStartButton = new ToolbarButton(new Rectangle(rx - 80, y, 80, 28), _state.AutoStartWaves ? "Auto ON" : "Auto OFF", null,
             () => { _state.AutoStartWaves = !_state.AutoStartWaves; _autoStartPref = _state.AutoStartWaves;
@@ -573,6 +588,12 @@ public class Game1 : Game
 
     private void UpdatePlaying(GameTime gameTime, KeyboardState kb, MouseState mouse)
     {
+        // Tick the save-confirmation popup with real time so it dismisses even when paused.
+        if (_saveConfirmTimer > 0f)
+        {
+            _saveConfirmTimer -= (float)gameTime.ElapsedGameTime.TotalSeconds;
+            if (_saveConfirmTimer < 0f) _saveConfirmTimer = 0f;
+        }
         if (_paused) { if (JustPressed(kb, Keys.Space)) _paused = false;
             if (JustPressed(kb, Keys.G)) { OpenGlossary(); return; }
             if (LeftClicked(mouse)) HandlePauseClick(mouse); return; }
@@ -603,6 +624,9 @@ public class Game1 : Game
 
     private void HandlePauseClick(MouseState mouse)
     {
+        // Clicking anywhere while the save-confirmation popup is visible dismisses it
+        // early without consuming the click for other pause-menu actions.
+        if (_saveConfirmTimer > 0f) _saveConfirmTimer = 0f;
         float cx = GameSettings.ScreenWidth / 2f, cy = GameSettings.ScreenHeight / 2f;
         int bw = 160, bh = 32, gap = 8, bx = (int)(cx - bw / 2f), by = (int)(cy + 10);
         if (new Rectangle(bx, by, bw, bh).Contains(mouse.X, mouse.Y)) { _paused = false; AudioManager.Instance.Play("ui_click", 0.4f); return; } by += bh + gap;
@@ -794,6 +818,7 @@ public class Game1 : Game
             }
         }
 
+        if (rc) foreach (var btn in _toolbar) if (btn.OnRightClick != null && btn.Bounds.Width > 0 && btn.Bounds.Contains(mouse.X, mouse.Y)) { btn.OnRightClick(); return; }
         if (lc) foreach (var btn in _toolbar) if (btn.Bounds.Width > 0 && btn.Bounds.Contains(mouse.X, mouse.Y)) { btn.OnClick(); return; }
         if (JustPressed(kb, Keys.Space)) _waves.RequestStart();
         _mouseWorld = new Vector2(mouse.X, mouse.Y);
@@ -1161,7 +1186,7 @@ public class Game1 : Game
         {
             ToolbarStyle.Compact  => "Single row of compact buttons (default).",
             ToolbarStyle.Grouped  => "Category buttons open dropdown menus.",
-            ToolbarStyle.TwoRow   => "Two rows — projectiles up top, utility below.",
+            ToolbarStyle.TwoRow   => "Two rows - projectiles up top, utility below.",
             ToolbarStyle.Custom   => "Click-drag tower buttons to reorder. Saved automatically.",
             _ => ""
         };
@@ -1214,7 +1239,36 @@ public class Game1 : Game
 
     private void DrawGame()
     { _map.Draw(_spriteBatch, _sprites); DrawPlacementGhost(); DrawTowers(); DrawDrones(); DrawFlames(); DrawEnemies(); DrawProjectiles();
-      DrawHUD(); DrawToolbar(); _contextMenu.Draw(_spriteBatch, _sprites.Pixel, _font); }
+      DrawHUD(); DrawToolbar(); _contextMenu.Draw(_spriteBatch, _sprites.Pixel, _font); DrawSaveConfirmPopup(); }
+
+    /// <summary>Centred confirmation banner shown for a few seconds after a successful save,
+    /// regardless of whether the pause menu is open. Fades out over its final second so the
+    /// dismissal feels deliberate rather than abrupt.</summary>
+    private void DrawSaveConfirmPopup()
+    {
+        if (_saveConfirmTimer <= 0f || string.IsNullOrEmpty(_saveConfirmText)) return;
+        float alpha = _saveConfirmTimer < 1f ? _saveConfirmTimer : 1f;
+        var textSize = _font.MeasureString(_saveConfirmText);
+        int padX = 18, padY = 12;
+        int w = (int)textSize.X + padX * 2;
+        int h = (int)textSize.Y + padY * 2 + 18; // extra room for the small hint line
+        int x = (int)((GameSettings.ScreenWidth - w) / 2f);
+        int y = GameSettings.UIHeight + 24;
+        var bg = new Rectangle(x, y, w, h);
+        _spriteBatch.Draw(_sprites.Pixel, bg, new Color(20, 60, 30) * (0.92f * alpha));
+        var accent = new Color(120, 220, 140) * alpha;
+        _spriteBatch.Draw(_sprites.Pixel, new Rectangle(bg.X, bg.Y, bg.Width, 2), accent);
+        _spriteBatch.Draw(_sprites.Pixel, new Rectangle(bg.X, bg.Bottom - 2, bg.Width, 2), accent);
+        _spriteBatch.Draw(_sprites.Pixel, new Rectangle(bg.X, bg.Y, 2, bg.Height), accent);
+        _spriteBatch.Draw(_sprites.Pixel, new Rectangle(bg.Right - 2, bg.Y, 2, bg.Height), accent);
+        _spriteBatch.DrawString(_font, _saveConfirmText,
+            new Vector2(x + padX, y + padY), Color.White * alpha);
+        const string hint = "Click anywhere to dismiss";
+        var hintSize = _font.MeasureString(hint);
+        _spriteBatch.DrawString(_font, hint,
+            new Vector2(x + (w - hintSize.X) / 2f, y + padY + textSize.Y + 4),
+            new Color(180, 220, 190) * (0.85f * alpha));
+    }
 
     private void DrawPlacementGhost()
     {
@@ -1345,6 +1399,40 @@ public class Game1 : Game
             var ts = _font.MeasureString(lbl);
             _spriteBatch.DrawString(_font, lbl, new Vector2(ghost.X + (ghost.Width - ts.X) / 2f, ghost.Y + (ghost.Height - ts.Y) / 2f), Color.White);
         }
+
+        // Tooltip on hover. Drawn last so it sits above all other toolbar chrome.
+        // Suppressed during a drag so the ghost is the only thing following the cursor.
+        if (!(_toolbarPrefs.Style == ToolbarStyle.Custom && _dragActive))
+        {
+            var mState = Mouse.GetState();
+            foreach (var btn in _toolbar)
+            {
+                if (string.IsNullOrEmpty(btn.Tooltip) || btn.Bounds.Width == 0) continue;
+                if (!btn.Bounds.Contains(mState.X, mState.Y)) continue;
+                DrawTooltip(btn.Tooltip!, btn.Bounds);
+                break;
+            }
+        }
+    }
+
+    private void DrawTooltip(string text, Rectangle anchor)
+    {
+        var size = _font.MeasureString(text);
+        const int padX = 6, padY = 4;
+        int w = (int)size.X + padX * 2;
+        int h = (int)size.Y + padY * 2;
+        // Prefer below the anchor; if it would go off-screen, place above.
+        int x = anchor.X + (anchor.Width - w) / 2;
+        int y = anchor.Bottom + 4;
+        if (y + h > GameSettings.ScreenHeight) y = anchor.Y - h - 4;
+        x = Math.Clamp(x, 4, GameSettings.ScreenWidth - w - 4);
+        var bg = new Rectangle(x, y, w, h);
+        _spriteBatch.Draw(_sprites.Pixel, bg, new Color(15, 15, 25) * 0.95f);
+        _spriteBatch.Draw(_sprites.Pixel, new Rectangle(bg.X, bg.Y, bg.Width, 1), new Color(120, 120, 160));
+        _spriteBatch.Draw(_sprites.Pixel, new Rectangle(bg.X, bg.Bottom - 1, bg.Width, 1), new Color(120, 120, 160));
+        _spriteBatch.Draw(_sprites.Pixel, new Rectangle(bg.X, bg.Y, 1, bg.Height), new Color(120, 120, 160));
+        _spriteBatch.Draw(_sprites.Pixel, new Rectangle(bg.Right - 1, bg.Y, 1, bg.Height), new Color(120, 120, 160));
+        _spriteBatch.DrawString(_font, text, new Vector2(x + padX, y + padY), Color.White);
     }
 
     private void DrawGlossary()

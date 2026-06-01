@@ -101,21 +101,31 @@ public class Map
         return ok;
     }
 
-    /// <summary>Returns true if placing a wall here would change the current path.
-    /// Temporarily places the wall, computes the new path, compares waypoint-by-waypoint.</summary>
+    /// <summary>Returns true if placing a wall here would disrupt enemies that are
+    /// currently walking the path. We block placement when:
+    ///   (a) the wall would break the route entirely (no path exists), or
+    ///   (b) the wall sits on a cell that is part of the current enemy path —
+    ///       i.e. it would teleport already-moving enemies backwards or forwards
+    ///       as they snap to the new BFS waypoints.
+    /// Walls placed in cells that aren't on the active path are allowed even
+    /// during waves: BFS may pick a different *equivalent-length* route as a
+    /// tie-break, but the enemies' lived-in path isn't disturbed in a way the
+    /// player would perceive as broken. Previously this method returned true
+    /// for any BFS divergence, which after several waves of walls made nearly
+    /// every wall placement fail because BFS had many tie-broken alternatives.</summary>
     public bool WouldAlterPath(int col, int row)
     {
         if (!IsInBounds(col, row) || Grid[col, row] != CellType.Empty) return true;
+        // (a) Would the placement disconnect spawn from exit?
         Grid[col, row] = CellType.Wall;
         var newPath = FindPath(SpawnCell, ExitCell);
         Grid[col, row] = CellType.Empty;
-        if (newPath == null) return true; // would block entirely
-        if (newPath.Count != CurrentPath.Count) return true;
-        for (int i = 0; i < newPath.Count; i++)
-        {
-            var wp = GridToWorld(newPath[i].X, newPath[i].Y);
-            if (wp != CurrentPath[i]) return true;
-        }
+        if (newPath == null) return true;
+        // (b) Is the cell on the current enemy path? If yes, an active wave's
+        //     enemies would visibly jump; disallow. Otherwise allow.
+        var wp = GridToWorld(col, row);
+        foreach (var cw in CurrentPath)
+            if (cw == wp) return true;
         return false;
     }
 

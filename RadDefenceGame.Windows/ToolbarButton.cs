@@ -11,6 +11,8 @@ public class ToolbarButton
     public string Label { get; private set; }
     public Keys? Hotkey { get; }
     public Action OnClick { get; }
+    public Action? OnRightClick { get; }
+    public string? Tooltip { get; private set; }
     public Color Accent { get; }
 
     /// <summary>The tower type this button represents, if any. Used by the Custom
@@ -24,17 +26,21 @@ public class ToolbarButton
 
     public ToolbarButton(Rectangle bounds, string label, Keys? hotkey,
         Action onClick, Func<bool> isSelected, Func<bool> isEnabled, Color accent,
-        TowerType? towerType = null)
+        TowerType? towerType = null, Action? onRightClick = null, string? tooltip = null)
     {
         Bounds = bounds;
         Label = label;
         Hotkey = hotkey;
         OnClick = onClick;
+        OnRightClick = onRightClick;
+        Tooltip = tooltip;
         Accent = accent;
         _isSelected = isSelected;
         _isEnabled = isEnabled;
         TowerType = towerType;
     }
+
+    public void SetTooltip(string? tooltip) => Tooltip = tooltip;
 
     public void SetLabel(string label) => Label = label;
     public void SetBounds(Rectangle r) => Bounds = r;
